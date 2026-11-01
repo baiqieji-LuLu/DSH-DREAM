@@ -30,7 +30,7 @@ by default; only the short retrieved context is sent to the LLM.
 
 **1. Download and extract the release package.**
 
-Download the `release_v0.2.0_prealpha` ZIP from the project's GitHub Releases page (or use the
+Download the `DSH-DREAM-v0.2.0-prealpha` ZIP from the project's GitHub Releases page (or use the
 package supplied by the maintainer), then open PowerShell in the extracted folder:
 
 ```powershell
