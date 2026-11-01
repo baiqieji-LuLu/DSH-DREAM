@@ -22,7 +22,7 @@ DSH-DREAM 同时提供 DSH 社区插件和 Python 库。检索默认在本地运
 
 **1. 下载并解压发布包。**
 
-从项目的 GitHub Releases 页面下载 `release_v0.2.0_prealpha` ZIP（或使用维护者提供的包），在解压目录打开 PowerShell：
+从项目的 GitHub Releases 页面下载 `DSH-DREAM-v0.2.0-prealpha.zip` ZIP（或使用维护者提供的包），在解压目录打开 PowerShell：
 
 ```powershell
 Expand-Archive .\DSH-DREAM-v0.2.0-prealpha.zip -DestinationPath .\DSH-DREAM
