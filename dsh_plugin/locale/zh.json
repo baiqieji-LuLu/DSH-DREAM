@@ -1,0 +1,6 @@
+{
+  "meta": {
+    "title": "DSH-DREAM 长期记忆",
+    "description": "配置持久化记忆、滑动窗口 Token 预算与 RAG 检索深度。"
+  }
+}

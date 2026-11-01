@@ -1,0 +1,6 @@
+{
+  "meta": {
+    "title": "DSH-DREAM",
+    "description": "Configure persistent memory, the window token budget, and RAG retrieval depth."
+  }
+}

@@ -1,0 +1,183 @@
+{
+  "run_id": "trivia-20261031T001015",
+  "records": 100,
+  "target_ids": [
+    "trivia-010",
+    "trivia-050",
+    "trivia-090"
+  ],
+  "query": "我那个星巴克蓝色马克杯现在怎么样了？",
+  "search_memory_ids": [
+    "trivia-090",
+    "trivia-094",
+    "trivia-093"
+  ],
+  "search_vector_ids": [
+    "trivia-010",
+    "trivia-050",
+    "trivia-090"
+  ],
+  "search_memory_hits": [
+    {
+      "id": "trivia-090",
+      "content": "又在网上买了一个同款的蓝色马克杯补上。",
+      "distance": 0.419308066368103
+    },
+    {
+      "id": "trivia-094",
+      "content": "今天咖啡喝多了，晚上有点睡不着。",
+      "distance": 0.6562131643295288
+    },
+    {
+      "id": "trivia-093",
+      "content": "下午把下周的计划列了一遍。",
+      "distance": 0.7045468688011169
+    }
+  ],
+  "search_vector_hits": [
+    {
+      "id": "trivia-010",
+      "content": "今天逛街买了一个星巴克的蓝色马克杯。",
+      "distance": 0.2941909432411194
+    },
+    {
+      "id": "trivia-050",
+      "content": "刚才不小心把那个蓝色马克杯摔碎了，有点可惜。",
+      "distance": 0.4171473979949951
+    },
+    {
+      "id": "trivia-090",
+      "content": "又在网上买了一个同款的蓝色马克杯补上。",
+      "distance": 0.419308066368103
+    }
+  ],
+  "diary": "今天中午吃了一碗牛肉面，味道还可以。早上坐地铁上班，车厢里人很多。下午开了两个小时的会，有点累。晚饭后沿着小区走了两圈。今天把阳台的绿萝浇了水。晚上看了一集纪录片，讲深海生物。下班路上顺便取了快递。今天风很大，窗户响了一晚上。中午和同事去楼下吃了盖饭。今天逛街买了一个星巴克的蓝色马克杯。晚上煮了番茄鸡蛋面。早上差点没赶上公交。下午把下周的计划列了一遍。今天咖啡喝多了，晚上有点睡不着。把书桌收拾干净了。楼下便利店换了新老板。晚上给家里打了个电话。今天的工作比平时顺一点。午休时在工位上眯了十分钟。晚饭后看了一部老电影。把上周的账单整理了一下。刚才不小心把那个蓝色马克杯摔碎了，有点可惜。又在网上买了一个同款的蓝色马克杯补上。",
+  "diary_query": "根据日记，你那个星巴克蓝色马克杯不小心被摔碎了，之后又在网上买了一个同款的蓝色马克杯补上。",
+  "rag_query": "根据提供的材料，只知道“又在网上买了一个同款的蓝色马克杯补上”，但材料没有说明原来那个星巴克蓝色马克杯的具体情况（比如是否损坏、丢失等），也没有明确提到“星巴克”这个品牌。因此，关于它“现在怎么样了”，材料中没有足够信息，我不知道。",
+  "rag_vector_query": "根据材料，你原来的那个星巴克蓝色马克杯已经被摔碎了（[2]），后来又在网上买了一个同款的补上（[3]）。所以现在的情况是：原来那个碎了，现在有一个同款的蓝色马克杯。",
+  "cost": {
+    "diary_summary": "0.00027630",
+    "diary_query": "0.00005430",
+    "rag_query": "0.00005235",
+    "rag_vector_diagnostic": "0.00004530",
+    "total_c": "0.000428250",
+    "total_with_prior": "1.590302418"
+  },
+  "latency": {
+    "diary_summary": 1855.2519,
+    "diary_query": 1117.7648,
+    "rag_query": 1236.6835,
+    "rag_vector_diagnostic": 1129.1492
+  },
+  "usage": {
+    "diary_summary": {
+      "prompt_tokens": 1054,
+      "completion_tokens": 197,
+      "total_tokens": 1251,
+      "prompt_cache_hit_tokens": 0,
+      "prompt_cache_miss_tokens": 1054
+    },
+    "diary_query": {
+      "prompt_tokens": 250,
+      "completion_tokens": 28,
+      "total_tokens": 278,
+      "prompt_cache_hit_tokens": 0,
+      "prompt_cache_miss_tokens": 250
+    },
+    "rag_query": {
+      "prompt_tokens": 93,
+      "completion_tokens": 64,
+      "total_tokens": 157,
+      "prompt_cache_hit_tokens": 0,
+      "prompt_cache_miss_tokens": 93
+    },
+    "rag_vector_diagnostic": {
+      "prompt_tokens": 102,
+      "completion_tokens": 50,
+      "total_tokens": 152,
+      "prompt_cache_hit_tokens": 0,
+      "prompt_cache_miss_tokens": 102
+    }
+  },
+  "post_fix_timeline": {
+    "label": "d-timeline-query",
+    "query": "我那个星巴克蓝色马克杯现在怎么样了？请告诉我它的完整历史。",
+    "timeline_hits": [
+      {
+        "id": "trivia-010",
+        "content": "今天逛街买了一个星巴克的蓝色马克杯。",
+        "timestamp_ms": 1790863200000
+      },
+      {
+        "id": "trivia-050",
+        "content": "刚才不小心把那个蓝色马克杯摔碎了，有点可惜。",
+        "timestamp_ms": 1791007200000
+      },
+      {
+        "id": "trivia-090",
+        "content": "又在网上买了一个同款的蓝色马克杯补上。",
+        "timestamp_ms": 1791151200000
+      }
+    ],
+    "answer": "根据记忆原文，这个星巴克蓝色马克杯的完整历史如下：\n\n1. 你逛街时买了一个星巴克的蓝色马克杯。\n2. 后来你不小心把那个蓝色马克杯摔碎了，觉得有点可惜。\n3. 之后你又在网上买了一个同款的蓝色马克杯补上。\n\n所以它现在的状态是：原来那个已经摔碎，你已网购了一个同款补上。",
+    "usage": {
+      "prompt_tokens": 150,
+      "completion_tokens": 86,
+      "total_tokens": 236,
+      "prompt_cache_hit_tokens": 0,
+      "prompt_cache_miss_tokens": 150
+    },
+    "cost_usd": "0.00007410",
+    "cost_cny": "0.0005",
+    "latency_ms": 1671.3045,
+    "finish_reason": "stop",
+    "requested_at_cst": "2026-10-31T00:31:41+08:00",
+    "prompt_tokens_est": 146,
+    "prompt": "你是一个严谨的个人助理。只依据提供的记忆原文回答。材料中没有的信息，明确说不知道，不要编造。\n\n实验批次：exp-d-timeline-eab095bb03b86606（仅用于缓存隔离，不影响任务）\n\n以下是按时间从早到晚排列的记忆原文：\n<memory>\n[1] 今天逛街买了一个星巴克的蓝色马克杯。\n[2] 刚才不小心把那个蓝色马克杯摔碎了，有点可惜。\n[3] 又在网上买了一个同款的蓝色马克杯补上。\n</memory>\n\n问题：我那个星巴克蓝色马克杯现在怎么样了？请告诉我它的完整历史。\n请按时间顺序说明完整历史，不要只给最后状态。",
+    "response_id": "d658d81c-8da5-45b6-b327-cc82803b846a",
+    "response_model": "deepseek-flash",
+    "response": {
+      "id": "d658d81c-8da5-45b6-b327-cc82803b846a",
+      "choices": [
+        {
+          "finish_reason": "stop",
+          "index": 0,
+          "logprobs": null,
+          "message": {
+            "content": "根据记忆原文，这个星巴克蓝色马克杯的完整历史如下：\n\n1. 你逛街时买了一个星巴克的蓝色马克杯。\n2. 后来你不小心把那个蓝色马克杯摔碎了，觉得有点可惜。\n3. 之后你又在网上买了一个同款的蓝色马克杯补上。\n\n所以它现在的状态是：原来那个已经摔碎，你已网购了一个同款补上。",
+            "refusal": null,
+            "role": "assistant",
+            "annotations": null,
+            "audio": null,
+            "function_call": null,
+            "tool_calls": null
+          }
+        }
+      ],
+      "created": 1793377900,
+      "model": "deepseek-flash",
+      "object": "chat.completion",
+      "metadata": null,
+      "moderation": null,
+      "service_tier": null,
+      "system_fingerprint": "bc19ba97cbe016479903222bb1578db6",
+      "usage": {
+        "completion_tokens": 86,
+        "prompt_tokens": 150,
+        "total_tokens": 236,
+        "completion_tokens_details": null,
+        "prompt_tokens_details": {
+          "audio_tokens": null,
+          "cache_write_tokens": null,
+          "cached_tokens": 0,
+          "image_tokens": null,
+          "text_tokens": null
+        },
+        "prompt_cache_hit_tokens": 0,
+        "prompt_cache_miss_tokens": 150
+      }
+    },
+    "prior_spent_usd": "1.590302418",
+    "total_spent_usd": "1.590376518"
+  }
+}

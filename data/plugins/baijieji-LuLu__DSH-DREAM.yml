@@ -1,0 +1,7 @@
+url: https://github.com/baijieji-LuLu/DSH-DREAM
+name: baijieji-LuLu/DSH-DREAM
+category: memory
+description:
+  en: 'DSH-DREAM is a layered, auditable long-term memory system for LLM agents, featuring hybrid retrieval, state-slot conflict resolution, timeline retrieval, and a native DSH UI.'
+  zh: 'DSH-DREAM 是面向 LLM Agent 的分层、可审计长期记忆系统，支持混合检索、状态槽位冲突消解、时间线检索与 DSH 原生 UI 面板。'
+icon: https://raw.githubusercontent.com/baijieji-LuLu/DSH-DREAM/main/dsh_plugin/icon.png

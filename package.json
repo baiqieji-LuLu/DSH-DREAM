@@ -1,0 +1,42 @@
+{
+  "name": "@local/dsh-dream-settings",
+  "version": "0.2.0",
+  "private": true,
+  "type": "module",
+  "main": "./dsh_plugin/index.js",
+  "description": "DSH-native settings panel for the DSH-DREAM Python package.",
+  "exports": {
+    ".": "./dsh_plugin/index.js",
+    "./client": "./dsh_plugin/client.js",
+    "./locale/*.json": "./dsh_plugin/locale/*.json",
+    "./icon": "./dsh_plugin/icon.png",
+    "./screenshots": "./screenshots.json"
+  },
+  "files": [
+    "dsh_plugin/**/*",
+    "manifest.json",
+    "README.md",
+    "README_CN.md",
+    "README_EN.md",
+    "AGENT_GUIDE.md",
+    "cordis.patch.yml",
+    "screenshots.json"
+  ],
+  "dsh": {
+    "bundle": {
+      "patch": "./cordis.patch.yml"
+    },
+    "client": {
+      "platform": "web",
+      "immediately": true,
+      "inject": [
+        "@deepseek-ai/dsh-client-locale",
+        "@deepseek-ai/dsh-client-ui-settings"
+      ]
+    }
+  },
+  "dependencies": {
+    "@deepseek-ai/schemastery": "^3.18.5"
+  },
+  "icon": "dsh_plugin/icon.png"
+}

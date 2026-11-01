@@ -1,0 +1,196 @@
+{
+  "name": "DSH-DREAM",
+  "version": "0.2.0",
+  "description": "Persistent long-term memory for LLM agents with a DSH-native settings panel.",
+  "entry_point": "agent_memory.plugin_entry",
+  "dshPlugin": "dsh_plugin",
+  "icon": "dsh_plugin/icon.png",
+  "config": {
+    "$schema": "https://json-schema.org/draft/2020-12/schema",
+    "title": "DSH-DREAM Settings",
+    "type": "object",
+    "additionalProperties": false,
+    "properties": {
+      "enable_memory": {
+        "type": "boolean",
+        "title": "Enable long-term memory",
+        "description": "Turn Chroma-backed memory retrieval on or off. When off, memory_search returns an empty result without opening Chroma.",
+        "default": true,
+        "ui:widget": "toggle"
+      },
+      "rag_path": {
+        "type": "string",
+        "title": "Vector database path",
+        "description": "Absolute path to the Chroma persistence directory. Read-only in the DSH settings panel.",
+        "default": ".chroma",
+        "readOnly": true,
+        "ui:widget": "text"
+      },
+      "max_window_tokens": {
+        "type": "integer",
+        "title": "Window token budget",
+        "description": "Token budget used to initialize WindowManager.",
+        "default": 1500,
+        "minimum": 128,
+        "maximum": 32768,
+        "ui:widget": "number"
+      },
+      "retrieval_top_k": {
+        "type": "integer",
+        "title": "Retrieval top-k",
+        "description": "Number of RAG memories returned by memory_search.",
+        "default": 5,
+        "minimum": 1,
+        "maximum": 20,
+        "ui:widget": "number"
+      },
+      "embedding_provider": {
+        "type": "string",
+        "title": "Embedding provider",
+        "description": "local uses the bundled Chinese model; openai_compatible calls a cloud /embeddings API.",
+        "enum": [
+          "local",
+          "openai_compatible"
+        ],
+        "default": "local",
+        "ui:widget": "select"
+      },
+      "embedding_model": {
+        "type": "string",
+        "title": "Embedding model",
+        "description": "Cloud model name. Leave blank for the local BAAI model or the cloud default text-embedding-3-small.",
+        "default": "",
+        "ui:widget": "text"
+      },
+      "embedding_api_key": {
+        "type": "string",
+        "title": "Embedding API key",
+        "description": "Bearer token for the cloud embedding endpoint. Stored in the local bridge config; shown masked in the panel.",
+        "default": "",
+        "writeOnly": true,
+        "ui:widget": "password"
+      },
+      "embedding_base_url": {
+        "type": "string",
+        "title": "Embedding base URL",
+        "description": "OpenAI-compatible base URL, for example https://api.deepseek.com/v1 (confirm it matches your API key).",
+        "default": "",
+        "ui:widget": "text"
+      },
+      "auto_rebuild_collection": {
+        "type": "boolean",
+        "title": "Re-embed old data on dimension mismatch",
+        "description": "Try to re-embed old records into the new vector dimension. Cloud embedding APIs may consume tokens.",
+        "default": true,
+        "ui:widget": "toggle"
+      },
+      "holographic_mode": {
+        "type": "boolean",
+        "title": "Holographic mode (force full memory)",
+        "description": "When enabled, every completed turn writes the complete User and Assistant originals to the vector store, regardless of whether the agent called a tool.",
+        "default": false,
+        "ui:widget": "toggle"
+      }
+    }
+  },
+  "settings_schema": {
+    "$schema": "https://json-schema.org/draft/2020-12/schema",
+    "title": "DSH-DREAM Settings",
+    "type": "object",
+    "additionalProperties": false,
+    "required": [
+      "enable_memory",
+      "rag_path",
+      "max_window_tokens",
+      "retrieval_top_k",
+      "embedding_provider",
+      "embedding_model",
+      "embedding_api_key",
+      "embedding_base_url",
+      "auto_rebuild_collection",
+      "holographic_mode"
+    ],
+    "properties": {
+      "enable_memory": {
+        "type": "boolean",
+        "title": "Enable long-term memory",
+        "description": "Turn Chroma-backed memory retrieval on or off.",
+        "default": true,
+        "ui:widget": "toggle"
+      },
+      "rag_path": {
+        "type": "string",
+        "title": "Vector database path",
+        "description": "Absolute path to the Chroma persistence directory. Read-only.",
+        "default": ".chroma",
+        "readOnly": true,
+        "ui:widget": "text"
+      },
+      "max_window_tokens": {
+        "type": "integer",
+        "title": "Window token budget",
+        "description": "Token budget used to initialize WindowManager.",
+        "default": 1500,
+        "minimum": 128,
+        "maximum": 32768,
+        "ui:widget": "number"
+      },
+      "retrieval_top_k": {
+        "type": "integer",
+        "title": "Retrieval top-k",
+        "description": "Number of RAG memories returned by memory_search.",
+        "default": 5,
+        "minimum": 1,
+        "maximum": 20,
+        "ui:widget": "number"
+      },
+      "embedding_provider": {
+        "type": "string",
+        "title": "Embedding provider",
+        "description": "local uses the bundled Chinese model; openai_compatible calls a cloud /embeddings API.",
+        "enum": [
+          "local",
+          "openai_compatible"
+        ],
+        "default": "local",
+        "ui:widget": "select"
+      },
+      "embedding_model": {
+        "type": "string",
+        "title": "Embedding model",
+        "description": "Cloud model name. Leave blank for the local BAAI model or the cloud default text-embedding-3-small.",
+        "default": "",
+        "ui:widget": "text"
+      },
+      "embedding_api_key": {
+        "type": "string",
+        "title": "Embedding API key",
+        "description": "Bearer token for the cloud embedding endpoint. Stored in the local bridge config; shown masked in the panel.",
+        "default": "",
+        "writeOnly": true,
+        "ui:widget": "password"
+      },
+      "embedding_base_url": {
+        "type": "string",
+        "title": "Embedding base URL",
+        "description": "OpenAI-compatible base URL, for example https://api.deepseek.com/v1 (confirm it matches your API key).",
+        "default": "",
+        "ui:widget": "text"
+      },
+      "auto_rebuild_collection": {
+        "type": "boolean",
+        "title": "Re-embed old data on dimension mismatch",
+        "description": "Try to re-embed old records into the new vector dimension. Cloud embedding APIs may consume tokens.",
+        "default": true,
+        "ui:widget": "toggle"
+      },
+      "holographic_mode": {
+        "type": "boolean",
+        "title": "Holographic mode (force full memory)",
+        "description": "When enabled, every completed turn writes the complete User and Assistant originals to the vector store, regardless of whether the agent called a tool.",
+        "default": false,
+        "ui:widget": "toggle"
+      }
+    }
+  }
+}
