@@ -22,7 +22,7 @@ DSH-DREAM 同时提供 DSH 社区插件和 Python 库。检索默认在本地运
 
 **1. 下载并解压发布包。**
 
-从项目的 GitHub Releases 页面下载 `DSH-DREAM-v0.2.0-prealpha` ZIP（或使用维护者提供的包），在解压目录打开 PowerShell：
+从项目的 GitHub Releases 页面下载 `release_v0.2.0_prealpha` ZIP（或使用维护者提供的包），在解压目录打开 PowerShell：
 
 ```powershell
 Expand-Archive .\DSH-DREAM-v0.2.0-prealpha.zip -DestinationPath .\DSH-DREAM
@@ -223,6 +223,28 @@ DSH-DREAM/
 特别致谢 BH4FKW 为本项目提供的核心技术路径指导、架构设计建议与严谨评审。
 
 Special thanks to BH4FKW for providing the core theoretical framework, technical path design, and rigorous review throughout this project.
+
+## 依赖与致谢 (Dependencies & Credits)
+
+本项目离不开以下优秀的开源项目和模型（本项目不捆绑打包，均通过标准包管理器动态安装）：
+
+**Python 核心依赖:**
+
+- [ChromaDB](https://github.com/chroma-core/chroma) (Apache-2.0) - 本地向量数据库
+- [sentence-transformers](https://github.com/UKPLab/sentence-transformers) (Apache-2.0) - 向量化模型框架
+- [PyTorch](https://github.com/pytorch/pytorch) (BSD-3-Clause) - 深度学习底层框架
+- [rank-bm25](https://github.com/dorianbrown/rank_bm25) (Apache-2.0) - BM25 关键词检索算法
+- [latex2mathml](https://github.com/roniemartinez/latex2mathml) (MIT) - LaTeX 公式转换
+
+**AI 模型:**
+
+- [BAAI/bge-small-zh-v1.5](https://huggingface.co/BAAI/bge-small-zh-v1.5) (MIT) - 本地中文向量化模型
+
+**DSH 插件生态依赖:**
+
+- [@deepseek-ai/schemastery](https://github.com/deepseek-ai) (DSH Official) - DSH 原生 UI 渲染引擎
+
+感谢这些开源先驱，让赛博记忆得以实现。
 
 ## 许可证
 

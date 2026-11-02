@@ -30,7 +30,7 @@ by default; only the short retrieved context is sent to the LLM.
 
 **1. Download and extract the release package.**
 
-Download the `DSH-DREAM-v0.2.0-prealpha` ZIP from the project's GitHub Releases page (or use the
+Download the `release_v0.2.0_prealpha` ZIP from the project's GitHub Releases page (or use the
 package supplied by the maintainer), then open PowerShell in the extracted folder:
 
 ```powershell
@@ -269,6 +269,28 @@ DSH-DREAM/
 Special thanks to BH4FKW for providing the core theoretical framework, technical path design, and rigorous review throughout this project.
 
 特别致谢 BH4FKW 为本项目提供的核心技术路径指导、架构设计建议与严谨评审。
+
+## Dependencies & Credits
+
+This project is built on the following open-source projects and models. They are not bundled; they are installed dynamically through standard package managers.
+
+**Python core dependencies:**
+
+- [ChromaDB](https://github.com/chroma-core/chroma) (Apache-2.0) - Local vector database
+- [sentence-transformers](https://github.com/UKPLab/sentence-transformers) (Apache-2.0) - Embedding model framework
+- [PyTorch](https://github.com/pytorch/pytorch) (BSD-3-Clause) - Deep-learning runtime
+- [rank-bm25](https://github.com/dorianbrown/rank_bm25) (Apache-2.0) - BM25 keyword retrieval
+- [latex2mathml](https://github.com/roniemartinez/latex2mathml) (MIT) - LaTeX-to-MathML conversion
+
+**AI model:**
+
+- [BAAI/bge-small-zh-v1.5](https://huggingface.co/BAAI/bge-small-zh-v1.5) (MIT) - Local Chinese embedding model
+
+**DSH plugin ecosystem dependency:**
+
+- [@deepseek-ai/schemastery](https://github.com/deepseek-ai) (DSH Official) - DSH native UI rendering engine
+
+Thanks to these open-source pioneers for making cyber memory possible.
 
 ## License
 
