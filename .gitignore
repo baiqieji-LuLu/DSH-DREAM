@@ -91,3 +91,7 @@ pnpm-debug.log*
 # Vim / Editor temp files
 *.swp
 *.swo
+
+# Private chat archive (never commit)
+.chat_archive_chroma/
+.chat_archive_txt/

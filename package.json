@@ -35,8 +35,8 @@
       ]
     }
   },
-  "dependencies": {
-    "@deepseek-ai/schemastery": "^3.18.5"
+  "peerDependencies": {
+    "@deepseek-ai/schemastery": ">=3.18.5-rc.1 <4.0.0-0"
   },
   "icon": "dsh_plugin/icon.png"
 }
