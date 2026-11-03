@@ -18,6 +18,8 @@ DSH-DREAM 同时提供 DSH 社区插件和 Python 库。检索默认在本地运
 
 ## 2. 快速开始
 
+**Prerequisites:** Python 3.10+ required. Run `pip install -e ".[dev]"` first.
+
 ### 方式 A：在 DSH 客户端部署（推荐给普通用户）
 
 **1. 下载并解压发布包。**

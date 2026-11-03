@@ -26,6 +26,8 @@ by default; only the short retrieved context is sent to the LLM.
 
 ## 2. Quick Start
 
+**Prerequisites:** Python 3.10+ required. Run `pip install -e ".[dev]"` first.
+
 ### A. DSH client (recommended for most users)
 
 **1. Download and extract the release package.**

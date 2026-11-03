@@ -16,19 +16,67 @@
   powershell -ExecutionPolicy Bypass -File .\install-agent-memory-plugin.ps1 -Force
 
 .EXAMPLE
-  .\install-agent-memory-plugin.ps1 -PluginDir "G:\dsh_plugin_test_workspace\dsh_plugin" -Force
+  .\install-agent-memory-plugin.ps1 -PluginDir .\dsh_plugin -PythonPath "C:\Python312\python.exe" -Force
 #>
 [CmdletBinding()]
 param(
-    [string]$PluginDir = 'G:\dsh_plugin_test_workspace\dsh_plugin',
-    [string]$ProjectRoot = 'G:\deepseek_ragproject_workspace',
-    [string]$DshRoot = 'G:\deepseekharness',
+    [string]$PluginDir = '',
+    [string]$ProjectRoot = '',
+    [string]$DshRoot = $env:DSH_ROOT,
+    [string]$PythonPath = $env:DSH_DREAM_PYTHON,
     [string]$Profile = 'desktop',
     [switch]$Force,
     [switch]$NoRestart
 )
 
 $ErrorActionPreference = 'Stop'
+
+if ([string]::IsNullOrWhiteSpace($ProjectRoot)) {
+    $ProjectRoot = $PSScriptRoot
+}
+if ([string]::IsNullOrWhiteSpace($PluginDir)) {
+    $PluginDir = Join-Path $PSScriptRoot 'dsh_plugin'
+}
+
+if ([string]::IsNullOrWhiteSpace($DshRoot)) {
+    $candidates = @($env:DSH_HOME, $env:DSH_ROOT, (Get-Location).Path)
+    foreach ($candidate in $candidates) {
+        if ([string]::IsNullOrWhiteSpace($candidate) -or -not (Test-Path -LiteralPath $candidate)) {
+            continue
+        }
+        $candidatePath = (Resolve-Path -LiteralPath $candidate).Path
+        if ((Test-Path -LiteralPath (Join-Path $candidatePath 'DeepSeek Harness.exe')) -or
+            (Test-Path -LiteralPath (Join-Path $candidatePath 'resources\runtime\cli\bin\dsh.cmd'))) {
+            $DshRoot = $candidatePath
+            break
+        }
+    }
+}
+if ([string]::IsNullOrWhiteSpace($DshRoot)) {
+    $dshCommand = Get-Command dsh -ErrorAction SilentlyContinue
+    if ($dshCommand) {
+        $binDir = Split-Path -Parent $dshCommand.Source
+        $candidate = Resolve-Path -LiteralPath (Join-Path $binDir '..\..\..\..') -ErrorAction SilentlyContinue
+        if ($candidate) {
+            $DshRoot = $candidate.Path
+        }
+    }
+}
+if ([string]::IsNullOrWhiteSpace($DshRoot)) {
+    throw 'DSH root not found. Pass -DshRoot <path> or set DSH_ROOT/DSH_HOME.'
+}
+$DshRoot = (Resolve-Path -LiteralPath $DshRoot).Path
+$ProjectRoot = (Resolve-Path -LiteralPath $ProjectRoot).Path
+$PluginDir = (Resolve-Path -LiteralPath $PluginDir).Path
+
+if (-not [string]::IsNullOrWhiteSpace($PythonPath)) {
+    if (-not (Test-Path -LiteralPath $PythonPath)) {
+        throw "Python interpreter not found: $PythonPath"
+    }
+    $PythonPath = (Resolve-Path -LiteralPath $PythonPath).Path
+    [Environment]::SetEnvironmentVariable('DSH_DREAM_PYTHON', $PythonPath, 'User')
+    $env:DSH_DREAM_PYTHON = $PythonPath
+}
 
 $profileDir = Join-Path $env:USERPROFILE ".dsh\profiles\$Profile"
 $profilePackage = Join-Path $profileDir 'package.json'

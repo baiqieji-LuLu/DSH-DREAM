@@ -3,8 +3,8 @@
  *
  * The Host exports a `Config` schema with volatile fields that the Client
  * settings page reads and writes through `configForms`. On activation the
- * resolved values are also written to the absolute Python bridge file
- * `G:\deepseek_ragproject_workspace\agent_memory_config.json`.
+ * resolved values are also written to the Python bridge file next to the
+ * installed plugin root.
  *
  * `rag_path` is disabled (read-only) in the panel and defaults to the Python
  * project's Chroma directory. Set `AGENT_MEMORY_RAG_PATH` before starting DSH
@@ -29,19 +29,29 @@ import {
   messageText,
 } from "./holographic_events.js";
 
-/** Absolute Python project root shared by the DSH panel and the Python package. */
-const PROJECT_ROOT = "G:\\deepseek_ragproject_workspace";
-
 /** Profile entry id of the DSH settings form. */
 const ENTRY_ID = "dsh-dream-settings";
 
 /** Files used by the forced holographic turn bridge. */
 const PLUGIN_DIR = dirname(fileURLToPath(import.meta.url));
 const TURN_BRIDGE = resolve(PLUGIN_DIR, "turn_bridge.py");
-const PYTHON = resolve(PROJECT_ROOT, ".venv", "Scripts", "python.exe");
+
+/** Installed plugin root; never assume a developer checkout path. */
+const PROJECT_ROOT = resolve(process.env.DSH_DREAM_ROOT || resolve(PLUGIN_DIR, ".."));
+
+/**
+ * Prefer an explicitly configured interpreter, then the platform command on
+ * PATH. Do not hard-code a virtualenv path: users install into different roots.
+ */
+const PYTHON =
+  process.env.DSH_DREAM_PYTHON ||
+  (process.platform === "win32" ? "python" : "python3");
 
 /** Local activation log, useful when DSH's own runtime log is unavailable. */
-const DIAG_PATH = resolve(PROJECT_ROOT, "agent_memory_plugin.log");
+const DIAG_PATH = resolve(
+  process.env.DSH_DREAM_LOG || PROJECT_ROOT,
+  "agent_memory_plugin.log",
+);
 
 function diag(message) {
   try {

@@ -16,37 +16,22 @@ import re
 import sys
 from pathlib import Path
 
-_CHECKOUT_ROOT = Path(r"G:\deepseek_ragproject_workspace")
-
 
 def _project_root() -> Path:
-    """Locate the Python project root WITHOUT trusting ``__file__``.
-
-    DSH loads this plugin through a ``link:`` install that lives outside the
-    project (``G:\\dsh_plugin_test_workspace\\dsh_plugin``), so
-    ``Path(__file__).parents[1]`` resolves to a directory with no ``.hf-cache``
-    and every offline model load fails with "cannot initialize any local
-    embedding model". Anchor instead on the directory holding the config the
-    Host passes (it writes that file into the project root), falling back to
-    the checkout itself.
-    """
-    configured = os.environ.get("AGENT_MEMORY_CONFIG", "").strip()
-    if configured:
-        candidate = Path(configured).expanduser().resolve().parent
-        if (candidate / ".hf-cache").is_dir():
-            return candidate
-    return _CHECKOUT_ROOT
+    """Return the installed plugin root (the parent of ``dsh_plugin``)."""
+    return Path(__file__).resolve().parent.parent
 
 
 _PROJECT_ROOT = _project_root()
-# Hard-wired on purpose: the project cache is the only place the offline
-# sentence-transformers models are allowed to come from. Never inherit HF_HOME
-# from the Host process, which may point at a global cache that lacks them.
-os.environ["HF_HOME"] = str(_PROJECT_ROOT / ".hf-cache")
-os.environ["HF_HUB_CACHE"] = str(_PROJECT_ROOT / ".hf-cache" / "hub")
-os.environ["HF_HUB_OFFLINE"] = "1"
-os.environ["TRANSFORMERS_OFFLINE"] = "1"
-os.environ["HF_HUB_DISABLE_SYMLINKS"] = "1"
+# Prefer the project-local cache when present; otherwise leave the host's
+# HF_HOME untouched so npm-installed plugins can use a global model cache.
+_LOCAL_HF_CACHE = _PROJECT_ROOT / ".hf-cache"
+if _LOCAL_HF_CACHE.is_dir():
+    os.environ["HF_HOME"] = str(_LOCAL_HF_CACHE)
+    os.environ["HF_HUB_CACHE"] = str(_LOCAL_HF_CACHE / "hub")
+    os.environ["HF_HUB_OFFLINE"] = "1"
+    os.environ["TRANSFORMERS_OFFLINE"] = "1"
+    os.environ["HF_HUB_DISABLE_SYMLINKS"] = "1"
 
 from agent_memory.plugin_entry import get_plugin
 
