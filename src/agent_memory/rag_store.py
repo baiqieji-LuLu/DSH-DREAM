@@ -675,7 +675,6 @@ class RAGStore:
             SentenceTransformer(
                 self._model_name,
                 device=self._device,
-                local_files_only=True,
             )
         except Exception as exc:
             print(
