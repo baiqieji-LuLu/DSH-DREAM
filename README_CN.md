@@ -1,6 +1,6 @@
 # DSH-DREAM
 
-> Status: v0.5.0 Pre-Alpha
+> Status: v0.3.5 Pre-Alpha
 
 **DSH-DREAM: Durable RAG-Enhanced Agent Memory**
 
@@ -17,6 +17,9 @@ DSH-DREAM 是一个本地优先的长期记忆层，面向陪伴型 AI、助理�
 DSH-DREAM 同时提供 DSH 社区插件和 Python 库。检索默认在本地运行，只有很短的检索证据会交给 LLM。
 
 ## 2. 快速开始
+
+**首次运行须知：**
+本插件使用本地 RAG 引擎。首次启用时，系统会自动配置轻量级运行环境，并下载约 95MB 的本地向量模型。下载与配置时间取决于网络环境，请等待界面提示完成。后续检索将保持较低延迟。
 
 **Prerequisites:** Python 3.10+ required. Run `pip install -e ".[dev]"` first.
 

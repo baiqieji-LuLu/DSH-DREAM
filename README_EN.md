@@ -1,6 +1,6 @@
 # DSH-DREAM
 
-> Status: v0.5.0 Pre-Alpha
+> Status: v0.3.5 Pre-Alpha
 
 **DSH-DREAM: Durable RAG-Enhanced Agent Memory**
 
@@ -25,6 +25,9 @@ DSH-DREAM ships as both a DSH community plugin and a Python library. Retrieval r
 by default; only the short retrieved context is sent to the LLM.
 
 ## 2. Quick Start
+
+**First Run Notice:**
+This plugin utilizes a local RAG engine. On first startup, the system will automatically provision a lightweight runtime and download a local embedding model (approx. 95MB). The download and setup time depends on network conditions; please wait for the UI prompt. Subsequent retrievals will maintain lower latency.
 
 **Prerequisites:** Python 3.10+ required. Run `pip install -e ".[dev]"` first.
 
