@@ -165,13 +165,17 @@ export class PythonBridge {
     });
   }
 
-  async writeTurn(user, assistant) {
+  async writeTurn(user, assistant, extractedFact = null) {
     if (!["ready", "installed"].includes(this.runtime.state.status)) return false;
     const child = await this.ensure();
     if (!child?.stdin || child.stdin.destroyed) return false;
     try {
       child.stdin.write(
-        `${JSON.stringify({ user_msg: user, ai_msg: assistant })}\n`,
+        `${JSON.stringify({
+          user_msg: user,
+          ai_msg: assistant,
+          ...(extractedFact ? { extracted_fact: extractedFact } : {}),
+        })}\n`,
       );
       return true;
     } catch (error) {

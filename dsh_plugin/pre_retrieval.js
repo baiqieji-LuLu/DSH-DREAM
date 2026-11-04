@@ -37,10 +37,15 @@ export function registerPreRetrieval(
   { queryMemory, holoLog = () => {}, diag = () => {} },
 ) {
   const onPreStep = async ({ messages, step, signal }, next) => {
+    console.log(`[PreRetrieval] agent/pre-step fired step=${step}`);
     const decision = await next();
     if (decision.kind === "reject" || step !== 1) return decision;
     const query = queryFromMessages(messages);
-    if (!query) return decision;
+    if (!query) {
+      console.log("[PreRetrieval] no usable user query");
+      return decision;
+    }
+    console.log(`[PreRetrieval] query=${query.slice(0, 120)}`);
     const result = await queryMemory(query, 3, 800, signal);
     if (result?.ok === false) {
       const line =
@@ -69,8 +74,17 @@ export function registerPreRetrieval(
     };
   };
 
-  ctx.effect(
-    () => ctx.on("agent/pre-step", onPreStep),
-    "DSH-DREAM.pre-retrieval",
-  );
+  try {
+    ctx.effect(
+      () => ctx.on("agent/pre-step", onPreStep),
+      "DSH-DREAM.pre-retrieval",
+    );
+    console.log("[PreRetrieval] agent/pre-step registered successfully");
+    diag("[PreRetrieval] agent/pre-step registered successfully");
+  } catch (error) {
+    console.error("[PreRetrieval] agent/pre-step registration failed:", error);
+    diag(
+      `[PreRetrieval] agent/pre-step registration failed: ${error?.stack || error}`,
+    );
+  }
 }

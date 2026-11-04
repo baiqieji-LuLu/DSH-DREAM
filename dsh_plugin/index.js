@@ -36,6 +36,11 @@ import { PythonBridge } from "./bridge_process.js";
 import { registerMemoryTools } from "./memory_tools.js";
 import { registerPreRetrieval } from "./pre_retrieval.js";
 
+// DSH's plugin contract injects declared services into `ctx` before apply().
+// Keep `tools` explicit so registration does not depend on a dynamic
+// ctx.inject() callback firing correctly.
+export const inject = ["tools"];
+
 /** Profile entry id of the DSH settings form. */
 const ENTRY_ID = "dsh-dream-settings";
 
@@ -360,6 +365,8 @@ export function apply(ctx, config) {
     });
     const queryMemory = (query, topK, timeoutMs, signal, timelineMode) =>
       bridge.query(query, topK, timeoutMs, signal, timelineMode);
+    const writeTurn = (user, assistant, extractedFact = null) =>
+      bridge.writeTurn(user, assistant, extractedFact);
     const sendHolographicTurn = (user, assistant) => {
       holoLog(
         `准备发往 Python 桥接 user=${preview(user)} assistant=${preview(assistant)}`,
@@ -374,7 +381,7 @@ export function apply(ctx, config) {
       return true;
     };
 
-    registerMemoryTools(ctx, { queryMemory, diag });
+    registerMemoryTools(ctx, { queryMemory, writeTurn, diag });
     registerPreRetrieval(ctx, { queryMemory, holoLog, diag });
 
     runtime
