@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import sys
 from pathlib import Path
 from typing import Any
 
@@ -35,10 +36,16 @@ def migrate_chroma_to_sqlite(
 
     try:
         import chromadb
-    except ImportError as exc:
-        raise RuntimeError(
-            "Chroma migration requires the optional 'legacy' dependencies"
-        ) from exc
+    except ImportError:
+        # Core install intentionally omits Chroma. Never break plugin startup:
+        # keep the old database untouched and let the user opt into migration.
+        print(
+            "[rag_store] 检测到旧版 Chroma 数据库；如需迁移，请安装 "
+            "可选 legacy 引擎：uv pip install chromadb sentence-transformers",
+            file=sys.stderr,
+            flush=True,
+        )
+        return 0
 
     client = chromadb.PersistentClient(path=str(chroma_dir))
     try:

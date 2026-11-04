@@ -6,12 +6,18 @@
  */
 import { spawn } from "node:child_process";
 import {
+  createWriteStream,
   existsSync,
   mkdirSync,
+  renameSync,
+  statSync,
   unlinkSync,
   writeFileSync,
 } from "node:fs";
+import { get as httpGet } from "node:http";
+import { get as httpsGet } from "node:https";
 import { dirname, resolve } from "node:path";
+import { pipeline } from "node:stream/promises";
 import { fileURLToPath } from "node:url";
 
 export const PLUGIN_DIR = dirname(fileURLToPath(import.meta.url));
@@ -31,6 +37,21 @@ export const DREAM_VENV = resolve(
 export const PIP_MIRROR =
   process.env.DSH_DREAM_PIP_MIRROR ||
   "https://pypi.tuna.tsinghua.edu.cn/simple";
+
+export const ONNX_MODEL_DIR = resolve(
+  PROFILE_DIR,
+  ".dream-models",
+  "bge-small-zh-v1.5",
+);
+export const ONNX_MODEL_FILE = resolve(ONNX_MODEL_DIR, "model.onnx");
+export const ONNX_TOKENIZER_FILE = resolve(ONNX_MODEL_DIR, "tokenizer.json");
+const ONNX_MODEL_URL =
+  process.env.DSH_DREAM_ONNX_MODEL_URL ||
+  "https://hf-mirror.com/Xenova/bge-small-zh-v1.5/resolve/main/onnx/model.onnx";
+const ONNX_TOKENIZER_URL =
+  process.env.DSH_DREAM_ONNX_TOKENIZER_URL ||
+  "https://hf-mirror.com/Xenova/bge-small-zh-v1.5/resolve/main/tokenizer.json";
+const ONNX_FALLBACK_BASE = "https://huggingface.co/Xenova/bge-small-zh-v1.5/resolve/main";
 
 const RUNTIME_PROBE = [
   "import importlib.util,json,sys",
@@ -52,6 +73,105 @@ function writableCacheDir(directory) {
     return directory;
   } catch {
     return null;
+  }
+}
+
+function downloadFile(url, destination, redirects = 5) {
+  return new Promise((resolvePromise, reject) => {
+    if (existsSync(destination) && statSync(destination).size > 0) {
+      resolvePromise(destination);
+      return;
+    }
+    const temp = `${destination}.part`;
+    const request = (url.startsWith("https:") ? httpsGet : httpGet)(
+      url,
+      { headers: { "User-Agent": "DSH-DREAM/0.5" } },
+      (response) => {
+        const status = response.statusCode || 0;
+        if (status >= 300 && status < 400 && response.headers.location) {
+          response.resume();
+          if (redirects <= 0) {
+            reject(new Error(`too many redirects: ${url}`));
+            return;
+          }
+          const next = new URL(response.headers.location, url).toString();
+          downloadFile(next, destination, redirects - 1).then(
+            resolvePromise,
+            reject,
+          );
+          return;
+        }
+        if (status !== 200) {
+          response.resume();
+          reject(new Error(`HTTP ${status} for ${url}`));
+          return;
+        }
+        const stream = createWriteStream(temp);
+        pipeline(response, stream)
+          .then(() => {
+            renameSync(temp, destination);
+            resolvePromise(destination);
+          })
+          .catch((error) => {
+            try {
+              unlinkSync(temp);
+            } catch {
+              // Best-effort cleanup.
+            }
+            reject(error);
+          });
+      },
+    );
+    request.setTimeout(5 * 60 * 1000, () => {
+      request.destroy(new Error(`download timed out: ${url}`));
+    });
+    request.on("error", (error) => {
+      try {
+        unlinkSync(temp);
+      } catch {
+        // Best-effort cleanup.
+      }
+      reject(error);
+    });
+  });
+}
+
+/** Download BGE ONNX assets into the profile, with a mirror and HF fallback. */
+export async function ensureOnnxAssets(diag = () => {}) {
+  if (
+    existsSync(ONNX_MODEL_FILE) &&
+    statSync(ONNX_MODEL_FILE).size > 0 &&
+    existsSync(ONNX_TOKENIZER_FILE) &&
+    statSync(ONNX_TOKENIZER_FILE).size > 0
+  ) {
+    return { ok: true, downloaded: false, dir: ONNX_MODEL_DIR };
+  }
+  try {
+    mkdirSync(ONNX_MODEL_DIR, { recursive: true });
+    diag(`[DSH-DREAM] downloading ONNX assets to ${ONNX_MODEL_DIR}`);
+    await downloadFile(ONNX_MODEL_URL, ONNX_MODEL_FILE);
+    await downloadFile(ONNX_TOKENIZER_URL, ONNX_TOKENIZER_FILE);
+    return { ok: true, downloaded: true, dir: ONNX_MODEL_DIR };
+  } catch (mirrorError) {
+    try {
+      diag(`[DSH-DREAM] mirror failed, trying huggingface.co: ${mirrorError}`);
+      await downloadFile(
+        `${ONNX_FALLBACK_BASE}/onnx/model.onnx`,
+        ONNX_MODEL_FILE,
+      );
+      await downloadFile(
+        `${ONNX_FALLBACK_BASE}/tokenizer.json`,
+        ONNX_TOKENIZER_FILE,
+      );
+      return { ok: true, downloaded: true, dir: ONNX_MODEL_DIR };
+    } catch (hfError) {
+      return {
+        ok: false,
+        downloaded: false,
+        dir: ONNX_MODEL_DIR,
+        error: String(hfError),
+      };
+    }
   }
 }
 
@@ -273,6 +393,16 @@ export class RuntimeEnv {
     }
   }
 
+  async _ensureOnnxAssets() {
+    return ensureOnnxAssets((message) => {
+      try {
+        this.diag(message);
+      } catch {
+        // Diagnostics must never block provisioning.
+      }
+    });
+  }
+
   async ensureReady() {
     if (this.ready) return this.ready;
     this.ready = this._ensureReady().catch((error) => {
@@ -309,11 +439,15 @@ export class RuntimeEnv {
       bridgeConfig.hf_home_path,
     );
     if (probe.ok) {
+      const assets = await this._ensureOnnxAssets();
       this.state = {
         status: "ready",
         python: probe.python || this.state.python,
         venv: DREAM_VENV,
         error: "",
+        warning: assets.ok
+          ? ""
+          : "ONNX 资产下载失败，正在下载备用引擎（sentence-transformers）",
       };
       return this.state;
     }
@@ -360,11 +494,15 @@ export class RuntimeEnv {
           UV_HTTP_TIMEOUT: "120",
         },
       );
+      const assets = await this._ensureOnnxAssets();
       this.state = {
         status: "installed",
         python: venvPythonPath(),
         venv: DREAM_VENV,
         error: "",
+        warning: assets.ok
+          ? ""
+          : "ONNX 资产下载失败，正在下载备用引擎（sentence-transformers）",
       };
     } catch (error) {
       this.state = {

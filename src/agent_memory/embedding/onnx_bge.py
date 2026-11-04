@@ -43,10 +43,12 @@ def find_onnx_assets(
     for root in roots:
         if root is None:
             continue
-        model = root / slug / "model.onnx"
-        tokenizer = root / slug / "tokenizer.json"
-        if model.is_file() and tokenizer.is_file():
-            return model, tokenizer
+        for name in (slug, "bge-small-zh-v1.5", ""):
+            base = root / name if name else root
+            model = base / "model.onnx"
+            tokenizer = base / "tokenizer.json"
+            if model.is_file() and tokenizer.is_file():
+                return model, tokenizer
     return None
 
 

@@ -159,6 +159,38 @@ DSH_DREAM_ONNX_MODEL + DSH_DREAM_ONNX_TOKENIZER
 "sentence-transformers"
 ```
 
+### 1.8 ONNX 资产自动下载
+
+`runtime_env.js` 新增 `ensureOnnxAssets()`：
+
+- 检查：
+  ```text
+  ~/.dsh/profiles/desktop/.dream-models/bge-small-zh-v1.5/model.onnx
+  ~/.dsh/profiles/desktop/.dream-models/bge-small-zh-v1.5/tokenizer.json
+  ```
+- 缺失时优先从 `hf-mirror.com` 下载；
+- 失败后自动改试 `huggingface.co`；
+- 支持环境变量覆盖：
+  ```text
+  DSH_DREAM_ONNX_MODEL_URL
+  DSH_DREAM_ONNX_TOKENIZER_URL
+  ```
+- 下载完成后 RuntimeEnv 才进入 `ready`；
+- 下载失败时保留插件启动，并在状态中写入：
+  ```text
+  正在下载备用引擎（sentence-transformers）
+  ```
+
+默认资产来自：
+
+```text
+Xenova/bge-small-zh-v1.5
+onnx/model.onnx
+tokenizer.json
+```
+
+模型约 95 MB，首次启动需要网络。
+
 ---
 
 ## 2. Phase 2：StorageBackend 抽象
@@ -268,12 +300,22 @@ python scripts/migrate_chroma_to_sqlite.py \
   --sqlite-path <new/agent_memory.sqlite3>
 ```
 
+缺少 Chroma 时迁移**不会崩溃**：
+
+- `import chromadb` 被 `try/except ImportError` 保护；
+- 返回 0 行，旧库保持原样；
+- 日志提示：
+  ```text
+  检测到旧版 Chroma 数据库；如需迁移，请安装 legacy 引擎
+  ```
+- 用户安装可选依赖后再次启动即可重试，marker 未写入，迁移仍会执行。
+
 ### 2.7 测试结果
 
 无 torch 干净虚拟环境：
 
 ```text
-97 passed, 1 skipped
+98 passed, 1 skipped
 ```
 
 跳过项：
@@ -346,6 +388,8 @@ onnxruntime tokenizers sqlite-vec rank-bm25 jinja2 numpy<2
 - ONNX BGE backend；
 - ONNX 与 sentence-transformers 100 条对齐通过；
 - ONNX 为本地默认 embedding engine；
+- ONNX 资产缺失时自动从 hf-mirror / HuggingFace 下载；
+- ONNX 资产下载失败时保留启动并提示备用引擎；
 - ONNX 资产缺失时自动回退 sentence-transformers；
 - RAGStore 接受注入 embedding backend；
 - VectorBackend 接口；
@@ -355,9 +399,10 @@ onnxruntime tokenizers sqlite-vec rank-bm25 jinja2 numpy<2
 - `MemoryConfig.storage_backend` 默认 sqlite-vec；
 - `MemoryConfig.embedding_engine` 默认 onnx；
 - Chroma → sqlite-vec 自动迁移与 marker；
+- Chroma 缺失时迁移优雅降级，不阻断启动；
 - runtime_env 不再安装 torch / sentence-transformers；
 - 核心依赖不再包含 torch / sentence-transformers；
-- 无 torch 干净环境 97 项测试通过；
+- 无 torch 干净环境 98 项测试通过；
 - 版本升级到 0.5.0。
 
 ### 仍需保留的边界
