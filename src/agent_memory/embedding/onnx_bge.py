@@ -6,6 +6,7 @@ only ``onnxruntime`` and ``tokenizers`` are required at runtime.
 
 from __future__ import annotations
 
+import os
 from collections.abc import Sequence
 from pathlib import Path
 from typing import Any
@@ -13,6 +14,40 @@ from typing import Any
 import numpy as np
 
 _DEFAULT_QUERY_INSTRUCTION = "为这个句子生成表示以用于检索相关文章："
+
+
+def find_onnx_assets(
+    model_name: str = "BAAI/bge-small-zh-v1.5",
+) -> tuple[Path, Path] | None:
+    """Find a local ONNX model plus tokenizer without downloading anything."""
+    explicit_dir = os.environ.get("DSH_DREAM_ONNX_DIR", "").strip()
+    explicit_model = os.environ.get("DSH_DREAM_ONNX_MODEL", "").strip()
+    explicit_tokenizer = os.environ.get("DSH_DREAM_ONNX_TOKENIZER", "").strip()
+    if explicit_model and explicit_tokenizer:
+        model = Path(explicit_model).expanduser()
+        tokenizer = Path(explicit_tokenizer).expanduser()
+        if model.is_file() and tokenizer.is_file():
+            return model, tokenizer
+
+    slug = model_name.replace("/", "--")
+    roots = [
+        Path(explicit_dir).expanduser() if explicit_dir else None,
+        Path(
+            os.environ.get("DSH_PROFILE_DIR", "")
+            or (Path.home() / ".dsh" / "profiles" / "desktop")
+        )
+        / ".dream-models",
+        Path.home() / ".dsh" / ".dream-models",
+        Path(__file__).resolve().parents[3] / "models",
+    ]
+    for root in roots:
+        if root is None:
+            continue
+        model = root / slug / "model.onnx"
+        tokenizer = root / slug / "tokenizer.json"
+        if model.is_file() and tokenizer.is_file():
+            return model, tokenizer
+    return None
 
 
 class OnnxBgeEmbedding:

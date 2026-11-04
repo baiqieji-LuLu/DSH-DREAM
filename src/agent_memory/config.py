@@ -66,6 +66,7 @@ DEFAULT_RETRIEVAL_TOP_K: Final[int] = 5
 MAX_WINDOW_TOKENS: Final[int] = 32_768
 MAX_TOP_K: Final[int] = 20
 DEFAULT_STORAGE_BACKEND: Final[str] = "sqlite-vec"
+DEFAULT_EMBEDDING_ENGINE: Final[str] = "onnx"
 DEFAULT_EMBEDDING_PROVIDER: Final[str] = "local"
 DEFAULT_EMBEDDING_MODEL: Final[str] = ""
 DEFAULT_EMBEDDING_API_KEY: Final[str] = ""
@@ -99,6 +100,7 @@ class MemoryConfig:
     max_window_tokens: int = DEFAULT_MAX_WINDOW_TOKENS
     retrieval_top_k: int = DEFAULT_RETRIEVAL_TOP_K
     storage_backend: str = DEFAULT_STORAGE_BACKEND
+    embedding_engine: str = DEFAULT_EMBEDDING_ENGINE
     embedding_provider: str = DEFAULT_EMBEDDING_PROVIDER
     embedding_model: str = DEFAULT_EMBEDDING_MODEL
     embedding_api_key: str = DEFAULT_EMBEDDING_API_KEY
@@ -117,6 +119,7 @@ class MemoryConfig:
             "max_window_tokens": self.max_window_tokens,
             "retrieval_top_k": self.retrieval_top_k,
             "storage_backend": self.storage_backend,
+            "embedding_engine": self.embedding_engine,
             "embedding_provider": self.embedding_provider,
             "embedding_model": self.embedding_model,
             "embedding_api_key": self.embedding_api_key,
@@ -239,6 +242,15 @@ def _coerce_storage_backend(value: object) -> str:
     return text
 
 
+def _coerce_embedding_engine(value: object) -> str:
+    text = str(value or DEFAULT_EMBEDDING_ENGINE).strip().lower()
+    if text not in {"onnx", "sentence-transformers"}:
+        raise ConfigError(
+            "embedding_engine must be 'onnx' or 'sentence-transformers'"
+        )
+    return text
+
+
 def load_config(config_path: str | Path | None = None) -> MemoryConfig:
     """Load and validate the effective memory configuration.
 
@@ -295,6 +307,9 @@ def load_config(config_path: str | Path | None = None) -> MemoryConfig:
         ),
         storage_backend=_coerce_storage_backend(
             merged.get("storage_backend"),
+        ),
+        embedding_engine=_coerce_embedding_engine(
+            merged.get("embedding_engine"),
         ),
         embedding_provider=_coerce_provider(merged.get("embedding_provider")),
         embedding_model=_coerce_text(

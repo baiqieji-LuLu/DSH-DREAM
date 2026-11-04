@@ -33,6 +33,7 @@ import uuid
 from collections.abc import Iterable, Mapping, Sequence
 from dataclasses import dataclass
 
+from .embedding.onnx_bge import OnnxBgeEmbedding, find_onnx_assets
 from .storage.chroma_backend import ChromaVectorBackend
 from .storage.sqlite_backend import SqliteVecBackend
 from datetime import datetime, timezone
@@ -338,6 +339,7 @@ class RAGStore:
         auto_rebuild_collection: bool = True,
         flat_max_records: int = DEFAULT_FLAT_MAX_RECORDS,
         storage_backend: str = "sqlite-vec",
+        embedding_engine: str = "onnx",
     ) -> None:
         if not isinstance(collection_name, str) or not collection_name.strip():
             raise MemoryValidationError("collection_name must be a non-empty string")
@@ -375,6 +377,7 @@ class RAGStore:
             if (client is not None or embedding_function is not None)
             else str(storage_backend).strip().lower()
         )
+        self._embedding_engine = str(embedding_engine).strip().lower()
         self._collection: Any = None
         self._client_shared = False
         self._client_key = ""
@@ -402,6 +405,32 @@ class RAGStore:
             self._model_name = str(
                 getattr(embedding_backend, "model_name", model_name)
             )
+        elif (
+            active_embedding is None
+            and client is None
+            and self._embedding_provider == "local"
+            and self._embedding_engine == "onnx"
+        ):
+            assets = find_onnx_assets(model_name)
+            if assets is not None:
+                try:
+                    onnx_backend = OnnxBgeEmbedding(*assets)
+                    active_embedding = onnx_backend.embed_documents
+                    self._embedding_backend = onnx_backend
+                    self._model_name = model_name
+                    self._custom_embedding = True
+                    print(
+                        f"[rag_store] using ONNX embedding: {assets[0]}",
+                        file=sys.stderr,
+                        flush=True,
+                    )
+                except Exception as exc:
+                    print(
+                        f"[rag_store] ONNX embedding unavailable; falling back "
+                        f"to sentence-transformers: {exc}",
+                        file=sys.stderr,
+                        flush=True,
+                    )
         if active_embedding is None and client is None:
             if provider == "openai_compatible":
                 if not embedding_base_url.strip():
@@ -438,6 +467,24 @@ class RAGStore:
                 _DIMENSION_KEY: new_dimension,
                 "backend": "sqlite-vec",
             }
+            try:
+                from .storage.migrate import migrate_if_needed
+
+                sqlite_file = (
+                    self._persist_directory
+                    / f"{self._collection_name}.sqlite3"
+                )
+                migrate_if_needed(
+                    self._persist_directory,
+                    sqlite_file,
+                    collection_name=self._collection_name,
+                )
+            except Exception as exc:
+                print(
+                    f"[rag_store] Chroma migration skipped: {exc}",
+                    file=sys.stderr,
+                    flush=True,
+                )
             self._backend = SqliteVecBackend(
                 self._persist_directory,
                 collection_name=self._collection_name,

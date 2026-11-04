@@ -1,8 +1,8 @@
-# v0.5.0 Phase 1/2 实施报告：Embedding 与 Storage 解耦
+# v0.5.0 Phase 1/2/3 实施报告：ONNX、Storage 解耦与 sqlite-vec
 
-> 版本：v0.5.0  
-> 范围：Phase 1 ONNX embedding + Phase 2 VectorBackend 抽象  
-> 状态：Phase 1 ONNX 对齐已通过；Phase 3 sqlite-vec 已接入并设为默认后端
+> 版本：v0.5.0
+> 范围：ONNX 默认 embeddings、VectorBackend、sqlite-vec、Chroma 迁移
+> 状态：ENV/ONNX/Storage 三项完成；无 torch 干净环境测试通过
 
 ---
 
@@ -125,6 +125,40 @@ BGE 的 pooling 配置已确认：
 
 因此默认使用 **CLS pooling**；mean pooling 仍作为可选模式保留。
 
+### 1.7 ONNX 默认引擎
+
+`RAGStore` 默认：
+
+```python
+embedding_engine="onnx"
+```
+
+当以下条件同时成立时，优先加载 ONNX：
+
+- 没有显式传入 `embedding_function`；
+- 没有显式传入 Chroma `client`；
+- `embedding_provider == "local"`；
+- 本地找到 ONNX 资产。
+
+ONNX 资产查找顺序：
+
+```text
+DSH_DREAM_ONNX_MODEL + DSH_DREAM_ONNX_TOKENIZER
+→ DSH_DREAM_ONNX_DIR
+→ ~/.dsh/profiles/desktop/.dream-models/<model>/
+→ ~/.dsh/.dream-models/<model>/
+→ <project>/models/<model>/
+```
+
+资产缺失或加载失败时，才回退 sentence-transformers。
+
+`MemoryConfig.embedding_engine` 默认也是 `"onnx"`，可显式配置：
+
+```text
+"onnx"
+"sentence-transformers"
+```
+
 ---
 
 ## 2. Phase 2：StorageBackend 抽象
@@ -204,7 +238,39 @@ RAGStore(storage_backend="sqlite-vec")
 - `MemoryConfig.storage_backend` 默认 `"sqlite-vec"`，支持显式 `"chroma"`；
 - `plugin_entry` 会把该配置传给 RAGStore。
 
-### 2.6 测试结果
+### 2.6 Chroma → sqlite-vec 自动迁移
+
+新增：
+
+```text
+src/agent_memory/storage/migrate.py
+scripts/migrate_chroma_to_sqlite.py
+```
+
+逻辑：
+
+- 检测旧目录下 `chroma.sqlite3`；
+- 读取 Chroma `agent_memory` collection；
+- 分批读取 `ids / documents / metadatas / embeddings`；
+- 以 float32 写入 sqlite-vec；
+- 生成 marker：
+  ```text
+  .agent_memory.chroma-migrated.json
+  ```
+- marker 存在时跳过迁移；
+- 旧 Chroma 数据不删除，失败不会破坏原库。
+
+`RAGStore` 在 sqlite 初始化时会自动调用 `migrate_if_needed()`；也可以手动执行：
+
+```text
+python scripts/migrate_chroma_to_sqlite.py \
+  --chroma-path <old/.chroma> \
+  --sqlite-path <new/agent_memory.sqlite3>
+```
+
+### 2.7 测试结果
+
+无 torch 干净虚拟环境：
 
 ```text
 97 passed, 1 skipped
@@ -239,19 +305,36 @@ src/agent_memory/__init__.py
 README*.md
 ```
 
-`pyproject.toml` 新增可选 extra：
+核心依赖已切换为轻量栈：
 
 ```toml
-onnx = [
+dependencies = [
+  "numpy>=1.26,<2",
   "onnxruntime>=1.17,<2",
   "tokenizers>=0.15,<1",
-]
-sqlite = [
   "sqlite-vec>=0.1.6",
+  "jinja2>=3.1.0",
+  "rank-bm25>=0.2.2",
 ]
 ```
 
-Phase 1 已通过，但当前 `RAGStore` 的默认 embedding 仍是 sentence-transformers；ONNX 作为可选 backend 接入，避免一次性改变所有现有部署。
+旧重依赖移入可选 `legacy`：
+
+```toml
+legacy = [
+  "chromadb>=0.4.24,<0.5.0",
+  "torch>=2.0",
+  "sentence-transformers>=2.7.0",
+]
+```
+
+`runtime_env.js` 自动装配列表已改为：
+
+```text
+onnxruntime tokenizers sqlite-vec rank-bm25 jinja2 numpy<2
+```
+
+不再自动安装 torch 或 sentence-transformers。
 
 ---
 
@@ -262,27 +345,33 @@ Phase 1 已通过，但当前 `RAGStore` 的默认 embedding 仍是 sentence-tra
 - EmbeddingBackend 接口；
 - ONNX BGE backend；
 - ONNX 与 sentence-transformers 100 条对齐通过；
+- ONNX 为本地默认 embedding engine；
+- ONNX 资产缺失时自动回退 sentence-transformers；
 - RAGStore 接受注入 embedding backend；
 - VectorBackend 接口；
 - ChromaVectorBackend；
 - SqliteVecBackend；
 - RAGStore 默认 sqlite-vec（显式 client/embedding_function 时保留 Chroma）；
 - `MemoryConfig.storage_backend` 默认 sqlite-vec；
-- 97 项测试通过；
+- `MemoryConfig.embedding_engine` 默认 onnx；
+- Chroma → sqlite-vec 自动迁移与 marker；
+- runtime_env 不再安装 torch / sentence-transformers；
+- 核心依赖不再包含 torch / sentence-transformers；
+- 无 torch 干净环境 97 项测试通过；
 - 版本升级到 0.5.0。
 
 ### 仍需保留的边界
 
+- ONNX 模型资产需要用户自行放置或下载；
 - Chroma collection 生命周期尚未完全迁入 ChromaVectorBackend；
-- ONNX 目前是可选 embedding backend，尚未替换默认 sentence-transformers；
 - sqlite-vec 的 10k/100k 性能仍需压测；
-- 旧 Chroma 数据迁移尚未实现。
+- 旧 Chroma 迁移依赖可选 `legacy` 依赖执行，迁移本身不删除旧数据。
 
 ---
 
 ## 5. 建议下一步
 
-1. 对 ONNX 与 ST 分别导出 **同一 tokenizer 输入**的 hidden state，逐层比对；
-2. 固定 padding/truncation 参数，排查 `tokenize()` 与 `encode()` 的差异；
-3. 用单条文本确认 ST 是否应用了额外 prompt/instruction；
-4. 通过后再将 ONNX 设为可选默认，并开始 sqlite-vec Phase 3。
+1. 为 ONNX 模型资产增加官方下载/校验流程；
+2. 对 sqlite-vec 做 10k/100k 召回与延迟压测；
+3. 将 Chroma collection 生命周期完全迁入 backend 或彻底移除；
+4. 在真实用户旧库上验证迁移 marker 与重复启动幂等性。

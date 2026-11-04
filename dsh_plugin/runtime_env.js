@@ -34,7 +34,7 @@ export const PIP_MIRROR =
 
 const RUNTIME_PROBE = [
   "import importlib.util,json,sys",
-  "mods=('agent_memory','chromadb','sentence_transformers')",
+  "mods=('agent_memory','onnxruntime','tokenizers','sqlite_vec')",
   "missing=[m for m in mods if importlib.util.find_spec(m) is None]",
   "print(json.dumps({'ok':not missing,'missing':missing,'python':sys.executable}))",
 ].join("; ");
@@ -344,9 +344,11 @@ export class RuntimeEnv {
           "install",
           "--python",
           venvPythonPath(),
-          "chromadb",
-          "sentence-transformers",
-          "torch==2.2.1",
+          "onnxruntime",
+          "tokenizers",
+          "sqlite-vec",
+          "rank-bm25",
+          "jinja2",
           "numpy<2",
           "--quiet",
           "--index-url",
