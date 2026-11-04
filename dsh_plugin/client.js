@@ -32,7 +32,7 @@ window.__ModuleLoader__.load({
         'Number of RAG memories returned by memory_search (1–20).',
       ragPath: 'Chroma persistence path',
       ragPathHint:
-        "Default: the current user's DSH data directory. Set AGENT_MEMORY_RAG_PATH before starting DSH to override.",
+        "Default: the current user's DSH data directory. To change it, set AGENT_MEMORY_RAG_PATH and restart DSH.",
       embeddingTitle: 'Embedding model (advanced)',
       embeddingWarning:
         '⚠️ 警告：更换 Embedding 模型会改变向量维度！修改此项后，系统将尝试无损重嵌入旧数据（或要求您手动清空旧 RAG 数据库），否则新记忆将无法与旧记忆一起被检索！',
@@ -88,7 +88,7 @@ window.__ModuleLoader__.load({
       topK: 'RAG 召回数量',
       topKHint: 'memory_search 返回的记忆条数（1–20）。',
       ragPath: 'Chroma 持久化路径',
-      ragPathHint: '默认存储于当前用户的 DSH 数据目录下，支持通过环境变量 AGENT_MEMORY_RAG_PATH 覆盖。',
+      ragPathHint: '默认存储于当前用户的 DSH 数据目录下。如需更改，请设置环境变量 AGENT_MEMORY_RAG_PATH 后重启 DSH。',
       embeddingTitle: 'Embedding 模型（高阶）',
       embeddingWarning:
         '⚠️ 警告：更换 Embedding 模型会改变向量维度！修改此项后，系统将尝试无损重嵌入旧数据（或要求您手动清空旧 RAG 数据库），否则新记忆将无法与旧记忆一起被检索！',
@@ -482,10 +482,9 @@ window.__ModuleLoader__.load({
 
       const writable = snapshot.writable !== false;
       const disabled = !writable || saving;
-      const ragPath =
-        (snapshot.value && snapshot.value.rag_path) ||
-        (snapshot.base && snapshot.base.rag_path) ||
-        '';
+      // The Host never sends the resolved absolute path. Keep the read-only
+      // field empty and explain the default in its placeholder/hint.
+      const ragPath = '';
 
       const pushBridge = async (payload) => {
         console.log('🔥 [Client] 推送配置到 Host', {

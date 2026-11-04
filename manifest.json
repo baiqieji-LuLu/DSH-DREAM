@@ -21,8 +21,8 @@
       "rag_path": {
         "type": "string",
         "title": "Vector database path",
-        "description": "Absolute path to the Chroma persistence directory. Read-only in the DSH settings panel.",
-        "default": ".chroma",
+        "description": "Read-only. The backend resolves the per-user DSH data directory; set AGENT_MEMORY_RAG_PATH before starting DSH to override.",
+        "default": "",
         "readOnly": true,
         "ui:widget": "text"
       },
@@ -121,8 +121,8 @@
       "rag_path": {
         "type": "string",
         "title": "Vector database path",
-        "description": "Absolute path to the Chroma persistence directory. Read-only.",
-        "default": ".chroma",
+        "description": "Read-only. The backend resolves the per-user DSH data directory; set AGENT_MEMORY_RAG_PATH before starting DSH to override.",
+        "default": "",
         "readOnly": true,
         "ui:widget": "text"
       },

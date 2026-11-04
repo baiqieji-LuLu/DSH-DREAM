@@ -6,9 +6,9 @@
  * resolved values are also written to the Python bridge file next to the
  * installed plugin root.
  *
- * `rag_path` is disabled (read-only) in the panel and defaults to the Python
- * project's Chroma directory. Set `AGENT_MEMORY_RAG_PATH` before starting DSH
- * to point the panel at another directory.
+ * `rag_path` is disabled (read-only) in the panel and is intentionally empty:
+ * the Host never sends the resolved user path to the browser. Set
+ * `AGENT_MEMORY_RAG_PATH` before starting DSH to override the backend default.
  */
 import { spawn } from "node:child_process";
 import {
@@ -114,20 +114,6 @@ export const CONFIG_BRIDGE_PATH = resolve(
   "agent_memory_config.json",
 );
 
-// User-scoped DSH data directory. Never fall back to the plugin/install
-// directory or an author checkout: a marketplace install must stay portable.
-const DSH_HOME = resolve(
-  process.env.DSH_HOME ||
-    resolve(process.env.USERPROFILE || process.env.HOME || ".", ".dsh"),
-);
-const PROFILE_DIR = resolve(
-  process.env.DSH_PROFILE_DIR || resolve(DSH_HOME, "profiles", "desktop"),
-);
-
-const DEFAULT_RAG_PATH = resolve(
-  process.env.AGENT_MEMORY_RAG_PATH || resolve(PROFILE_DIR, ".chroma"),
-);
-
 /**
  * Target bridge path. The default is the fixed absolute path above; an
  * explicit `AGENT_MEMORY_CONFIG` may override it for a non-default checkout.
@@ -159,9 +145,9 @@ export const Config = z.object({
 
   rag_path: z
     .string()
-    .default(DEFAULT_RAG_PATH)
+    .default("")
     .description(
-      "Absolute Chroma persistence path. Defaults to the current user's DSH data directory; set AGENT_MEMORY_RAG_PATH before starting DSH to override.",
+      "Read-only. The backend stores data in the current user's DSH data directory; set AGENT_MEMORY_RAG_PATH before starting DSH to override.",
     )
     .disabled()
     .volatile(),
@@ -249,7 +235,9 @@ function normalizePayload(raw) {
     .toLowerCase();
   return {
     enable_memory: Boolean(current(value.enable_memory) ?? true),
-    rag_path: resolve(current(value.rag_path) || DEFAULT_RAG_PATH),
+    // Never expose a resolved host path to the browser; the backend resolves
+    // the per-user DSH data directory (and honors AGENT_MEMORY_RAG_PATH).
+    rag_path: "",
     max_window_tokens: Number(current(value.max_window_tokens) ?? 1500),
     retrieval_top_k: Number(current(value.retrieval_top_k) ?? 5),
     embedding_provider:
