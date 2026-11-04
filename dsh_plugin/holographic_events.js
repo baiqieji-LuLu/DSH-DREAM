@@ -11,7 +11,8 @@ const SYSTEM_PREFIX =
 // message that STARTS with its marker. The anchor is what keeps a real turn
 // storable when it merely mentions one of these tags — for example an
 // assistant explaining this very filter, or a user pasting the tag.
-const INJECTED_MARKERS = /^\s*<(?:system-reminder|available_skills|skill_content)\b/i;
+const INJECTED_MARKERS =
+  /^\s*<(?:system-reminder|available_skills|skill_content|memory-hint)\b/i;
 const ANGLE_TAG_PREFIX = /^\s*<[^>]*>/;
 
 export function messageText(message) {

@@ -40,7 +40,7 @@ _SYSTEM_PREFIX = re.compile(
     re.IGNORECASE,
 )
 _INJECTED_MARKERS = re.compile(
-    r"^\s*<(?:system-reminder|available_skills|skill_content)\b",
+    r"^\s*<(?:system-reminder|available_skills|skill_content|memory-hint)\b",
     re.IGNORECASE,
 )
 _ANGLE_TAG_PREFIX = re.compile(r"^\s*<[^>]*>")
@@ -72,10 +72,35 @@ def main() -> int:
         line = raw.strip()
         if not line:
             continue
+        request_id = None
         try:
             payload = json.loads(line)
             if not isinstance(payload, dict):
                 raise ValueError("turn payload must be an object")
+            request_id = payload.get("request_id")
+            if payload.get("op") == "query":
+                query = str(payload.get("query") or "").strip()
+                if not query:
+                    raise ValueError("query must be a non-empty string")
+                top_k = int(payload.get("top_k") or 5)
+                timeline_mode = payload.get("timeline_mode") is True
+                result = get_plugin().memory_search(
+                    query,
+                    top_k=top_k,
+                    timeline_mode=timeline_mode,
+                )
+                print(
+                    json.dumps(
+                        {
+                            "request_id": request_id,
+                            "ok": True,
+                            "result": result,
+                        },
+                        ensure_ascii=False,
+                    ),
+                    flush=True,
+                )
+                continue
             print(
                 f"[Holo] 收到 turn user={_preview(payload.get('user_msg'))} "
                 f"assistant={_preview(payload.get('ai_msg'))}",
@@ -117,7 +142,11 @@ def main() -> int:
         except Exception as exc:  # keep the bridge alive after a bad turn
             print(
                 json.dumps(
-                    {"ok": False, "error": f"{type(exc).__name__}: {exc}"},
+                    {
+                        "request_id": request_id,
+                        "ok": False,
+                        "error": f"{type(exc).__name__}: {exc}",
+                    },
                     ensure_ascii=False,
                 ),
                 flush=True,

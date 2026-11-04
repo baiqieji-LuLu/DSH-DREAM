@@ -90,6 +90,7 @@ for (const injected of [
   "<system-reminder>hidden instruction</system-reminder>",
   "<available_skills>skill catalog</available_skills>",
   "<skill_content>body</skill_content>",
+  "<memory-hint>retrieved memory</memory-hint>",
   "<div>angle tag prefix</div>",
 ]) {
   assert.equal(isUsableDialogueText("user", injected), false, injected);

@@ -1,6 +1,6 @@
 {
   "name": "dsh-dream",
-  "version": "0.2.1",
+  "version": "0.3.0",
   "displayName": "DSH-DREAM 长期记忆",
   "private": true,
   "type": "module",
@@ -37,6 +37,8 @@
     }
   },
   "peerDependencies": {
+    "@deepseek-ai/dsh-llm": ">=0.2.1-rc.2 <0.3.0-0",
+    "@deepseek-ai/dsh-tools": ">=0.2.1-rc.2 <0.3.0-0",
     "@deepseek-ai/schemastery": ">=3.18.5-rc.1 <4.0.0-0"
   },
   "icon": "icon.png"
