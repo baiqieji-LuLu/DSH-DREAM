@@ -74,6 +74,13 @@ MIN_VECTOR_SCORE: Final[float] = 0.35
 RRF_K: Final[int] = 60
 DEFAULT_FLAT_MAX_RECORDS: Final[int] = 200_000
 
+# One PersistentClient per persistence directory. Chroma keeps a process-wide
+# system cache keyed by path; constructing a second client with different
+# settings triggers "An instance of Chroma already exists ... with different
+# settings" and can leave the Rust/SQLite backend holding a stale file lock.
+_CHROMA_CLIENTS: dict[str, dict[str, Any]] = {}
+_CHROMA_CLIENTS_LOCK = threading.RLock()
+
 # State predicates, not entity words.  A conflict requires the same predicate
 # family with *different* values (e.g. "key is at A" vs "key is at B").  A
 # sequence of actions ("bought", "broke", "bought a replacement") has no
@@ -359,6 +366,8 @@ class RAGStore:
         self._auto_rebuild_collection = bool(auto_rebuild_collection)
         self._flat_max_records = flat_max_records
         self._collection: Any = None
+        self._client_shared = False
+        self._client_key = ""
         self._custom_embedding = embedding_function is not None or client is not None
         self._query_instruction = ""
         # Lazy caches for the exact Flat scan, full-corpus BM25, and RRF.
@@ -1484,9 +1493,21 @@ class RAGStore:
         temporary persistence directory from being removed.
         """
         with self._lock:
-            close = getattr(self._client, "close", None)
-            if callable(close):
-                close()
+            if not self._client_shared:
+                close = getattr(self._client, "close", None)
+                if callable(close):
+                    close()
+                return
+            with _CHROMA_CLIENTS_LOCK:
+                cached = _CHROMA_CLIENTS.get(self._client_key)
+                if cached is not None and cached.get("client") is self._client:
+                    cached["refs"] = int(cached.get("refs", 1)) - 1
+                    if cached["refs"] <= 0:
+                        _CHROMA_CLIENTS.pop(self._client_key, None)
+                        close = getattr(self._client, "close", None)
+                        if callable(close):
+                            close()
+                self._client_shared = False
 
     def _parse_hits(self, result: Any) -> list[MemoryHit]:
         if not isinstance(result, Mapping):
@@ -1761,31 +1782,54 @@ class RAGStore:
                 f"Chroma persistence path is not a directory: {self._persist_directory}"
             )
 
-        try:
-            return factory(path=str(self._persist_directory))
-        except Exception as first_error:
-            # Ensure the failed attempt does not stay registered in Chroma's
-            # process-wide system cache; otherwise the settings retry fails
-            # with "An instance of Chroma already exists ... with different
-            # settings" instead of exercising the intended fallback.
-            self._clear_chroma_system_cache()
-            # Some Chroma/Rust builds need explicit persistent settings even
-            # after the directory exists. Retry once with an explicit Settings
-            # object; if that also fails, report both causes.
+        key = str(self._persist_directory.resolve())
+        with _CHROMA_CLIENTS_LOCK:
+            cached = _CHROMA_CLIENTS.get(key)
+            if cached is not None:
+                cached["refs"] += 1
+                self._client_shared = True
+                self._client_key = key
+                return cached["client"]
+
+            # Always use the same persistent settings for a path. Passing
+            # different Settings/EmbeddingFunction combinations to a second
+            # PersistentClient is what triggers Chroma's global lock error.
             settings = self._create_chroma_settings()
-            if settings is None:
-                raise RAGStoreError(
-                    f"cannot create a persistent Chroma client at "
-                    f"{self._persist_directory}: {first_error}"
-                ) from first_error
             try:
-                return factory(path=str(self._persist_directory), settings=settings)
-            except Exception as second_error:
-                raise RAGStoreError(
-                    f"cannot create a persistent Chroma client at "
-                    f"{self._persist_directory}; first attempt: {first_error}; "
-                    f"settings retry: {second_error}"
-                ) from second_error
+                if settings is not None:
+                    client = factory(
+                        path=str(self._persist_directory),
+                        settings=settings,
+                    )
+                else:
+                    client = factory(path=str(self._persist_directory))
+            except Exception as first_error:
+                # A transient SQLite code-14 can still occur on first open;
+                # clear Chroma's system cache and retry with the same explicit
+                # persistent settings before giving up.
+                self._clear_chroma_system_cache()
+                retry_settings = self._create_chroma_settings()
+                if retry_settings is None:
+                    raise RAGStoreError(
+                        f"cannot create a persistent Chroma client at "
+                        f"{self._persist_directory}: {first_error}"
+                    ) from first_error
+                try:
+                    client = factory(
+                        path=str(self._persist_directory),
+                        settings=retry_settings,
+                    )
+                except Exception as second_error:
+                    raise RAGStoreError(
+                        f"cannot create a persistent Chroma client at "
+                        f"{self._persist_directory}; first attempt: {first_error}; "
+                        f"settings retry: {second_error}"
+                    ) from second_error
+
+            _CHROMA_CLIENTS[key] = {"client": client, "refs": 1}
+            self._client_shared = True
+            self._client_key = key
+            return client
 
     @staticmethod
     def _create_chroma_settings() -> Any | None:

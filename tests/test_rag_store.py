@@ -248,8 +248,12 @@ class RAGStoreClientCreationTests(unittest.TestCase):
         self.assertTrue(target.is_dir())
         self.assertTrue(directory_existed_at_first_call)
         self.assertEqual(len(calls), 2)
-        self.assertNotIn("settings", calls[0])
+        self.assertIsInstance(calls[0]["settings"], Settings)
         self.assertIsInstance(calls[1]["settings"], Settings)
+        self.assertEqual(
+            calls[0]["settings"].kwargs,
+            {"allow_reset": True, "is_persistent": True},
+        )
         self.assertEqual(
             calls[1]["settings"].kwargs,
             {"allow_reset": True, "is_persistent": True},
