@@ -34,6 +34,7 @@ from collections.abc import Iterable, Mapping, Sequence
 from dataclasses import dataclass
 
 from .storage.chroma_backend import ChromaVectorBackend
+from .storage.sqlite_backend import SqliteVecBackend
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Final, Literal, TypeAlias, cast
@@ -336,6 +337,7 @@ class RAGStore:
         embedding_base_url: str = "",
         auto_rebuild_collection: bool = True,
         flat_max_records: int = DEFAULT_FLAT_MAX_RECORDS,
+        storage_backend: str = "sqlite-vec",
     ) -> None:
         if not isinstance(collection_name, str) or not collection_name.strip():
             raise MemoryValidationError("collection_name must be a non-empty string")
@@ -368,6 +370,11 @@ class RAGStore:
         self._embedding_provider = provider
         self._auto_rebuild_collection = bool(auto_rebuild_collection)
         self._flat_max_records = flat_max_records
+        self._storage_backend = (
+            "chroma"
+            if (client is not None or embedding_function is not None)
+            else str(storage_backend).strip().lower()
+        )
         self._collection: Any = None
         self._client_shared = False
         self._client_key = ""
@@ -420,6 +427,25 @@ class RAGStore:
             self.ensure_embedding_ready()
 
         new_dimension = self._probe_embedding_dimension()
+        if self._storage_backend == "sqlite-vec":
+            if new_dimension is None:
+                raise RAGStoreError(
+                    "cannot determine embedding dimension for sqlite-vec"
+                )
+            self._client = None
+            self._collection = None
+            self._collection_metadata = {
+                _DIMENSION_KEY: new_dimension,
+                "backend": "sqlite-vec",
+            }
+            self._backend = SqliteVecBackend(
+                self._persist_directory,
+                collection_name=self._collection_name,
+                dimension=new_dimension,
+                embedding_function=active_embedding,
+            )
+            return
+
         collection_metadata: dict[str, Any] = {
             "hnsw:space": "cosine",
             # 100k-scale recall needs a wider search beam than the old 200.
@@ -1521,6 +1547,9 @@ class RAGStore:
         temporary persistence directory from being removed.
         """
         with self._lock:
+            if self._storage_backend == "sqlite-vec":
+                self._backend.close()
+                return
             if not self._client_shared:
                 close = getattr(self._client, "close", None)
                 if callable(close):

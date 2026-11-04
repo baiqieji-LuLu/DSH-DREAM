@@ -35,6 +35,7 @@ class OnnxBgeEmbedding:
         try:
             import onnxruntime as ort
             from tokenizers import Tokenizer
+            from tokenizers.normalizers import BertNormalizer
         except ImportError as exc:  # pragma: no cover - exercised by install smoke test
             raise RuntimeError(
                 "OnnxBgeEmbedding requires 'onnxruntime' and 'tokenizers'. "
@@ -50,6 +51,15 @@ class OnnxBgeEmbedding:
         self.query_instruction = query_instruction
         self._tokenizer = Tokenizer.from_file(
             str(tokenizer_path or Path(model_path).parent / "tokenizer.json")
+        )
+        # BGE's sentence-transformers tokenizer applies do_lower_case=True.
+        # tokenizer.json alone declares lowercase=false, which turns "English"
+        # into [UNK] and causes ~0.96 ONNX/ST divergence on mixed text.
+        self._tokenizer.normalizer = BertNormalizer(
+            clean_text=True,
+            handle_chinese_chars=True,
+            strip_accents=None,
+            lowercase=True,
         )
         self._tokenizer.enable_truncation(max_length=self.max_length)
         self._tokenizer.enable_padding(

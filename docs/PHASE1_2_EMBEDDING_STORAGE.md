@@ -2,7 +2,7 @@
 
 > 版本：v0.5.0  
 > 范围：Phase 1 ONNX embedding + Phase 2 VectorBackend 抽象  
-> 状态：代码实现完成；**ONNX 与 sentence-transformers 的 100 条对齐验收未达到 >0.999 阈值，需要继续排查**
+> 状态：Phase 1 ONNX 对齐已通过；Phase 3 sqlite-vec 已接入并设为默认后端
 
 ---
 
@@ -92,20 +92,38 @@ python scripts/verify_onnx_embedding.py \
 
 ```text
 shape: (100, 512) vs (100, 512)
-cosine: min=0.95702600 mean=0.96510100 max=0.97076094
-threshold 0.999: failures=100/100
+cosine: min=0.99999988 mean=1.00000000 max=1.00000024
+threshold 0.999: failures=0/100
 ```
 
-**结论：未达到 >0.999 的验收标准。**
+**结论：100 条长文本全部通过 >0.999 验收。**
 
-已确认：
+根因与修复：
 
-- ONNX 输出与手动 PyTorch `AutoModel` 的 CLS 输出余弦为 1.0；
-- `sentence-transformers` 的 `encode()` 与手动 PyTorch 输出在部分测试中为 1.0；
-- 但 ONNX 与 `sentence-transformers.encode()` 的批量结果稳定在约 0.96；
-- 该差异需要继续定位（tokenizer padding、ST `encode` 内部预处理或 ONNX 图输入对齐）。
+- BGE 的 `tokenizer.json` 中 `lowercase=false`；
+- sentence-transformers 加载 BGE 时实际使用 `do_lower_case=True`；
+- 原生 tokenizers 因此把 "English" 等大写词切成 `[UNK]`，导致长文本约 0.96 偏差；
+- 在 `OnnxBgeEmbedding` 中显式设置：
+  ```python
+  BertNormalizer(
+      clean_text=True,
+      handle_chinese_chars=True,
+      strip_accents=None,
+      lowercase=True,
+  )
+  ```
+- 修复后短文本、长文本、100 条批量全部对齐。
 
-在差异解决前，不能宣称 Phase 1 验收通过，也不应把 ONNX 设为默认 embedding 引擎。
+BGE 的 pooling 配置已确认：
+
+```json
+{
+  "pooling_mode_cls_token": true,
+  "pooling_mode_mean_tokens": false
+}
+```
+
+因此默认使用 **CLS pooling**；mean pooling 仍作为可选模式保留。
 
 ---
 
@@ -158,10 +176,38 @@ self._backend = ChromaVectorBackend(self._collection, self._collection_name)
 - `_collection` 仍保留为兼容别名，供现有测试和迁移工具访问。
 - Chroma 的 collection 创建、维度迁移和 auto-rebuild 仍在 `RAGStore` 中，尚未完全迁入 backend。
 
-### 2.5 测试结果
+### 2.5 Phase 3：sqlite-vec 默认后端
+
+新增：
 
 ```text
-96 passed, 1 skipped
+src/agent_memory/storage/sqlite_backend.py
+tests/test_sqlite_backend.py
+```
+
+实现：
+
+- float32 embedding BLOB；
+- metadata JSON（timestamp_ms / source_type）；
+- add / upsert / query / search / get / delete / count；
+- SQLite WAL + busy_timeout；
+- `sqlite_vec.load()` 扩展加载。
+
+默认策略：
+
+```python
+RAGStore(storage_backend="sqlite-vec")
+```
+
+- 未显式传入 `client` / `embedding_function` 时默认 sqlite-vec；
+- 显式传入 Chroma client 或 embedding_function 时继续使用 Chroma；
+- `MemoryConfig.storage_backend` 默认 `"sqlite-vec"`，支持显式 `"chroma"`；
+- `plugin_entry` 会把该配置传给 RAGStore。
+
+### 2.6 测试结果
+
+```text
+97 passed, 1 skipped
 ```
 
 跳过项：
@@ -200,9 +246,12 @@ onnx = [
   "onnxruntime>=1.17,<2",
   "tokenizers>=0.15,<1",
 ]
+sqlite = [
+  "sqlite-vec>=0.1.6",
+]
 ```
 
-核心依赖仍保留当前的 Chroma + sentence-transformers 路径，因为 Phase 1 验收尚未通过。
+Phase 1 已通过，但当前 `RAGStore` 的默认 embedding 仍是 sentence-transformers；ONNX 作为可选 backend 接入，避免一次性改变所有现有部署。
 
 ---
 
@@ -212,19 +261,22 @@ onnx = [
 
 - EmbeddingBackend 接口；
 - ONNX BGE backend；
-- RAGStore 接受注入 backend；
+- ONNX 与 sentence-transformers 100 条对齐通过；
+- RAGStore 接受注入 embedding backend；
 - VectorBackend 接口；
 - ChromaVectorBackend；
-- RAGStore 的常用数据 I/O 走 backend；
-- 96 项测试通过；
+- SqliteVecBackend；
+- RAGStore 默认 sqlite-vec（显式 client/embedding_function 时保留 Chroma）；
+- `MemoryConfig.storage_backend` 默认 sqlite-vec；
+- 97 项测试通过；
 - 版本升级到 0.5.0。
 
-### 未完成 / 阻塞
+### 仍需保留的边界
 
-- ONNX 与 sentence-transformers 的 100 条对齐 **未达到 >0.999**；
 - Chroma collection 生命周期尚未完全迁入 ChromaVectorBackend；
-- Phase 1 暂不能作为默认 embedding 引擎发布；
-- 需要继续定位 ONNX/ST 差异后重新跑验收。
+- ONNX 目前是可选 embedding backend，尚未替换默认 sentence-transformers；
+- sqlite-vec 的 10k/100k 性能仍需压测；
+- 旧 Chroma 数据迁移尚未实现。
 
 ---
 

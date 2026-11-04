@@ -602,6 +602,7 @@ def configure_plugin(
                 embedding_model=effective_config.embedding_model,
                 embedding_api_key=effective_config.embedding_api_key,
                 embedding_base_url=effective_config.embedding_base_url,
+                storage_backend=effective_config.storage_backend,
                 auto_rebuild_collection=effective_config.auto_rebuild_collection,
             )
             if effective_enable

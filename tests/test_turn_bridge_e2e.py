@@ -5,12 +5,11 @@ from __future__ import annotations
 import json
 import os
 import shutil
+import sqlite3
 import subprocess
 import sys
 import uuid
 from pathlib import Path
-
-import chromadb
 
 ROOT = Path(__file__).resolve().parents[1]
 BRIDGE = ROOT / "dsh_plugin" / "turn_bridge.py"
@@ -70,16 +69,18 @@ def test_turn_bridge_writes_one_timestamped_turn() -> None:
         assert result["ok"] is True, (proc.stdout, proc.stderr)
         assert result["fact_memory_id"] is None
 
-        client = chromadb.PersistentClient(path=str(db_path))
-        collection = client.get_collection("agent_memory")
-        raw = collection.get(include=["documents", "metadatas"])
-        rows = list(
-            zip(
-                raw.get("ids", []),
-                raw.get("documents", []),
-                raw.get("metadatas", []),
-            )
-        )
+        sqlite_path = db_path / "agent_memory.sqlite3"
+        connection = sqlite3.connect(str(sqlite_path))
+        try:
+            raw_rows = connection.execute(
+                "SELECT memory_id, document, metadata_json FROM memories"
+            ).fetchall()
+        finally:
+            connection.close()
+        rows = [
+            (memory_id, document, json.loads(metadata_json))
+            for memory_id, document, metadata_json in raw_rows
+        ]
         assert len(rows) == 2
         by_source = {
             metadata["source_type"]: (document, metadata)

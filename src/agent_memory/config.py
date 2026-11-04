@@ -65,6 +65,7 @@ DEFAULT_MAX_WINDOW_TOKENS: Final[int] = 1_500
 DEFAULT_RETRIEVAL_TOP_K: Final[int] = 5
 MAX_WINDOW_TOKENS: Final[int] = 32_768
 MAX_TOP_K: Final[int] = 20
+DEFAULT_STORAGE_BACKEND: Final[str] = "sqlite-vec"
 DEFAULT_EMBEDDING_PROVIDER: Final[str] = "local"
 DEFAULT_EMBEDDING_MODEL: Final[str] = ""
 DEFAULT_EMBEDDING_API_KEY: Final[str] = ""
@@ -97,6 +98,7 @@ class MemoryConfig:
     rag_path: Path = DEFAULT_RAG_PATH
     max_window_tokens: int = DEFAULT_MAX_WINDOW_TOKENS
     retrieval_top_k: int = DEFAULT_RETRIEVAL_TOP_K
+    storage_backend: str = DEFAULT_STORAGE_BACKEND
     embedding_provider: str = DEFAULT_EMBEDDING_PROVIDER
     embedding_model: str = DEFAULT_EMBEDDING_MODEL
     embedding_api_key: str = DEFAULT_EMBEDDING_API_KEY
@@ -114,6 +116,7 @@ class MemoryConfig:
             "rag_path": str(self.rag_path),
             "max_window_tokens": self.max_window_tokens,
             "retrieval_top_k": self.retrieval_top_k,
+            "storage_backend": self.storage_backend,
             "embedding_provider": self.embedding_provider,
             "embedding_model": self.embedding_model,
             "embedding_api_key": self.embedding_api_key,
@@ -227,6 +230,15 @@ def _coerce_int(
     return max(minimum, min(maximum, number))
 
 
+def _coerce_storage_backend(value: object) -> str:
+    text = str(value or DEFAULT_STORAGE_BACKEND).strip().lower()
+    if text not in {"sqlite-vec", "chroma"}:
+        raise ConfigError(
+            "storage_backend must be 'sqlite-vec' or 'chroma'"
+        )
+    return text
+
+
 def load_config(config_path: str | Path | None = None) -> MemoryConfig:
     """Load and validate the effective memory configuration.
 
@@ -280,6 +292,9 @@ def load_config(config_path: str | Path | None = None) -> MemoryConfig:
             DEFAULT_RETRIEVAL_TOP_K,
             minimum=1,
             maximum=MAX_TOP_K,
+        ),
+        storage_backend=_coerce_storage_backend(
+            merged.get("storage_backend"),
         ),
         embedding_provider=_coerce_provider(merged.get("embedding_provider")),
         embedding_model=_coerce_text(
