@@ -85,7 +85,7 @@ $dshCmd = Join-Path $DshRoot 'resources\runtime\cli\bin\dsh.cmd'
 $dshExe = Join-Path $DshRoot 'DeepSeek Harness.exe'
 $configPath = Join-Path $ProjectRoot 'agent_memory_config.json'
 $ragPath = Join-Path $env:USERPROFILE ".dsh\profiles\$Profile\.chroma"
-$bundleName = '@local/dsh-dream-settings'
+$bundleName = 'dsh-dream'
 
 function Write-Step([string]$Message) {
     Write-Host "`n==> $Message" -ForegroundColor Cyan

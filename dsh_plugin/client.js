@@ -7,7 +7,7 @@
  * step and no import of another Harness Client package is required.
  */
 window.__ModuleLoader__.load({
-  id: '@local/dsh-dream-settings',
+  id: 'dsh-dream',
   factory(require) {
     const React = require('react');
     const h = React.createElement;

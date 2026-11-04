@@ -1,6 +1,6 @@
 - insert:
     - id: dsh-dream-settings
-      name: '@local/dsh-dream-settings'
+      name: 'dsh-dream'
       meta:
         title: DSH-DREAM 长期记忆
       config:

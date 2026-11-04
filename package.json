@@ -1,5 +1,5 @@
 {
-  "name": "@local/dsh-dream-settings",
+  "name": "dsh-dream",
   "version": "0.2.1",
   "displayName": "DSH-DREAM 长期记忆",
   "private": true,
