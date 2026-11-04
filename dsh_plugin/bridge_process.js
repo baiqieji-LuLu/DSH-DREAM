@@ -32,18 +32,39 @@ export class PythonBridge {
     this.closed = false;
   }
 
+  _log(level, message) {
+    const line = `[Bridge] ${message}`;
+    if (level === "error") console.error(line);
+    else console.log(line);
+    this.diag(line);
+  }
+
   async ensure() {
     if (this.closed) return null;
     if (this.child && !this.child.killed) return this.child;
     if (this.startPromise) return this.startPromise;
     this.startPromise = (async () => {
       const envState = await this.runtime.ensureReady();
-      if (!["ready", "installed"].includes(envState.status)) return null;
+      if (!["ready", "installed"].includes(envState.status)) {
+        this._log(
+          "error",
+          `runtime not ready: status=${envState.status} error=${
+            envState.error || "unknown"
+          }`,
+        );
+        return null;
+      }
       const config = this.getConfig() || {};
       const cache = resolveCache(config.hf_home_path);
-      if (!cache.path) return null;
+      if (!cache.path) {
+        this._log("error", `cache unavailable: ${cache.error || "unknown"}`);
+        return null;
+      }
       const python = envState.python || resolvePython(config.python_path);
-      const child = spawn(python, ["-u", this.bridgePath], {
+      this._log("info", `Spawning: ${python} ${this.bridgePath}`);
+      let child;
+      try {
+        child = spawn(python, ["-u", this.bridgePath], {
         cwd: this.projectRoot,
         env: {
           ...process.env,
@@ -58,9 +79,13 @@ export class PythonBridge {
           HF_HUB_OFFLINE: "0",
           TRANSFORMERS_OFFLINE: "0",
         },
-        stdio: ["pipe", "pipe", "pipe"],
-        windowsHide: true,
-      });
+          stdio: ["pipe", "pipe", "pipe"],
+          windowsHide: true,
+        });
+      } catch (error) {
+        this._log("error", `spawn threw: ${error?.stack || error}`);
+        return null;
+      }
       this.child = child;
       this.coldStart = true;
       this.buffer = "";
@@ -73,14 +98,15 @@ export class PythonBridge {
       });
       child.stderr.setEncoding("utf8");
       child.stderr.on("data", (chunk) => {
-        this.diag(`bridge stderr: ${String(chunk).trim()}`);
+        const text = String(chunk).trim();
+        this._log("error", `Stderr: ${text}`);
       });
       child.on("error", (error) => {
-        this.diag(`bridge spawn failed: ${error?.stack || error}`);
+        this._log("error", `spawn failed: ${error?.stack || error}`);
         this.child = null;
       });
       child.on("exit", (code, signal) => {
-        this.diag(`bridge exited code=${code} signal=${signal}`);
+        this._log("info", `Exited with code=${code} signal=${signal}`);
         this.child = null;
       });
       try {
@@ -88,7 +114,7 @@ export class PythonBridge {
           `${JSON.stringify({ op: "warmup", request_id: "warmup" })}\n`,
         );
       } catch (error) {
-        this.diag(`bridge warmup write failed: ${error?.stack || error}`);
+        this._log("error", `warmup write failed: ${error?.stack || error}`);
       }
       return child;
     })().finally(() => {
@@ -166,9 +192,18 @@ export class PythonBridge {
   }
 
   async writeTurn(user, assistant, extractedFact = null) {
-    if (!["ready", "installed"].includes(this.runtime.state.status)) return false;
+    if (!["ready", "installed"].includes(this.runtime.state.status)) {
+      this._log(
+        "error",
+        `writeTurn blocked: runtime status=${this.runtime.state.status}`,
+      );
+      return false;
+    }
     const child = await this.ensure();
-    if (!child?.stdin || child.stdin.destroyed) return false;
+    if (!child?.stdin || child.stdin.destroyed) {
+      this._log("error", "writeTurn blocked: bridge stdin unavailable");
+      return false;
+    }
     try {
       child.stdin.write(
         `${JSON.stringify({
