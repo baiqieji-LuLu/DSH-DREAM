@@ -156,11 +156,19 @@ class SqliteVecBackend:
         docs = [row[1] for row in rows]
         metas = [json.loads(row[2]) for row in rows]
         distances = [float(row[3]) for row in rows]
+        # vec0's default metric is L2. Embeddings are unit-normalized by the
+        # BGE/ONNX backends, so cosine = 1 - d^2/2. Keep both values: distance
+        # preserves the backend's native ordering, similarity is thresholdable.
+        similarities = [
+            max(-1.0, min(1.0, 1.0 - (distance * distance) / 2.0))
+            for distance in distances
+        ]
         return {
             "ids": [ids],
             "documents": [docs],
             "metadatas": [metas],
             "distances": [distances],
+            "similarities": [similarities],
         }
 
     def search(

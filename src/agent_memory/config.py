@@ -96,6 +96,7 @@ class MemoryConfig:
     """
 
     enable_memory: bool = True
+    enable_auto_recall: bool = True
     rag_path: Path = DEFAULT_RAG_PATH
     max_window_tokens: int = DEFAULT_MAX_WINDOW_TOKENS
     retrieval_top_k: int = DEFAULT_RETRIEVAL_TOP_K
@@ -115,6 +116,7 @@ class MemoryConfig:
         """
         return {
             "enable_memory": self.enable_memory,
+            "enable_auto_recall": self.enable_auto_recall,
             "rag_path": str(self.rag_path),
             "max_window_tokens": self.max_window_tokens,
             "retrieval_top_k": self.retrieval_top_k,
@@ -292,6 +294,10 @@ def load_config(config_path: str | Path | None = None) -> MemoryConfig:
 
     return MemoryConfig(
         enable_memory=_coerce_bool(merged.get("enable_memory"), True),
+        enable_auto_recall=_coerce_bool(
+            merged.get("enable_auto_recall"),
+            True,
+        ),
         rag_path=rag_path,
         max_window_tokens=_coerce_int(
             merged.get("max_window_tokens"),

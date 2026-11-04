@@ -742,6 +742,7 @@ def _hit_to_dict(hit: MemoryHit) -> dict[str, Any]:
         "content": hit.content,
         "source_type": hit.source_type,
         "distance": hit.distance,
+        "similarity": hit.similarity,
         "retrieval_source": hit.retrieval_source,
         "metadata": dict(hit.metadata),
     }

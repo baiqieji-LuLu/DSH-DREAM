@@ -290,6 +290,7 @@ class MemoryHit:
     source_type: SourceType
     metadata: Mapping[str, MetadataValue]
     distance: float | None = None
+    similarity: float | None = None
     retrieval_source: str = "vector"
 
 
@@ -1223,6 +1224,7 @@ class RAGStore:
                 (self._corpus_documents or [])[index],
                 (self._corpus_metadatas or [])[index],
                 1.0 - similarity,
+                similarity=similarity,
                 retrieval_source="vector",
             )
             if hit is not None:
@@ -1500,6 +1502,7 @@ class RAGStore:
                     source_type=hit.source_type,
                     metadata=hit.metadata,
                     distance=hit.distance,
+                    similarity=hit.similarity,
                     retrieval_source="hybrid",
                 )
             elif "bm25" in sources:
@@ -1509,6 +1512,7 @@ class RAGStore:
                     source_type=hit.source_type,
                     metadata=hit.metadata,
                     distance=None,
+                    similarity=None,
                     retrieval_source="bm25",
                 )
             else:
@@ -1518,6 +1522,7 @@ class RAGStore:
                     source_type=hit.source_type,
                     metadata=hit.metadata,
                     distance=hit.distance,
+                    similarity=hit.similarity,
                     retrieval_source="vector",
                 )
             fused.append(hit)
@@ -1620,17 +1625,22 @@ class RAGStore:
         documents_row = self._first_row(result.get("documents"))
         metadatas_row = self._first_row(result.get("metadatas"))
         distances_row = self._first_row(result.get("distances"))
+        similarities_row = self._first_row(result.get("similarities"))
 
         hits: list[MemoryHit] = []
         for index, raw_id in enumerate(ids_row):
             document = documents_row[index] if index < len(documents_row) else None
             metadata = metadatas_row[index] if index < len(metadatas_row) else None
             distance = distances_row[index] if index < len(distances_row) else None
+            similarity = (
+                similarities_row[index] if index < len(similarities_row) else None
+            )
             hit = self._build_hit(
                 raw_id,
                 document,
                 metadata,
                 distance,
+                similarity=similarity,
                 retrieval_source="vector",
             )
             if hit is not None:
@@ -1692,6 +1702,7 @@ class RAGStore:
         metadata: Any,
         distance: Any,
         *,
+        similarity: Any = None,
         retrieval_source: str,
     ) -> MemoryHit | None:
         if not isinstance(raw_id, str) or not isinstance(document, str):
@@ -1709,12 +1720,16 @@ class RAGStore:
         numeric_distance: float | None = None
         if isinstance(distance, (int, float)) and not isinstance(distance, bool):
             numeric_distance = float(distance)
+        numeric_similarity: float | None = None
+        if isinstance(similarity, (int, float)) and not isinstance(similarity, bool):
+            numeric_similarity = float(similarity)
         return MemoryHit(
             memory_id=raw_id,
             content=document,
             source_type=cast(SourceType, raw_source),
             metadata=clean_metadata,
             distance=numeric_distance,
+            similarity=numeric_similarity,
             retrieval_source=retrieval_source,
         )
 

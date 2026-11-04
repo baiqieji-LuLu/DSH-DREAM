@@ -145,6 +145,14 @@ export const Config = z.object({
     )
     .volatile(),
 
+  enable_auto_recall: z
+    .boolean()
+    .default(true)
+    .description(
+      "Inject a small optional memory hint before the first model step only when a highly relevant memory exists. memory_search remains available when disabled.",
+    )
+    .volatile(),
+
   rag_path: z
     .string()
     .default("")
@@ -252,6 +260,7 @@ function normalizePayload(raw) {
     .toLowerCase();
   return {
     enable_memory: Boolean(current(value.enable_memory) ?? true),
+    enable_auto_recall: Boolean(current(value.enable_auto_recall) ?? true),
     // Preserve an explicit UI override, but never synthesize a default path:
     // the backend resolves the per-user DSH data directory (and honors
     // AGENT_MEMORY_RAG_PATH) when this field is blank.
@@ -382,7 +391,12 @@ export function apply(ctx, config) {
     };
 
     registerMemoryTools(ctx, { queryMemory, writeTurn, diag });
-    registerPreRetrieval(ctx, { queryMemory, holoLog, diag });
+    registerPreRetrieval(ctx, {
+      queryMemory,
+      holoLog,
+      diag,
+      getConfig: () => readBridgeFile(target) || {},
+    });
 
     runtime
       .ensureReady()

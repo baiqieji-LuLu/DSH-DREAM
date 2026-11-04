@@ -24,6 +24,9 @@ window.__ModuleLoader__.load({
       enable: 'Enable long-term memory',
       enableHint:
         'When off, memory_search returns no results without opening Chroma.',
+      autoRecall: 'Auto-recall before each turn',
+      autoRecallHint:
+        'Inject optional memory hints only when a highly relevant memory exists. Disable to skip automatic retrieval; memory_search remains available.',
       maxWindow: 'Window token budget',
       maxWindowHint:
         'Token budget used to initialize WindowManager (128–32768).',
@@ -101,6 +104,9 @@ window.__ModuleLoader__.load({
       description: '配置 DSH-DREAM Python 包的持久化长期记忆。',
       enable: '启用长期记忆',
       enableHint: '关闭后 memory_search 不会打开 Chroma，直接返回空结果。',
+      autoRecall: '每轮自动预检索',
+      autoRecallHint:
+        '仅在记忆高度相关时注入可选的记忆提示。关闭后不再自动检索；memory_search 工具仍然可用。',
       maxWindow: '窗口 Token 预算',
       maxWindowHint: '用于初始化 WindowManager 的 Token 预算（128–32768）。',
       topK: 'RAG 召回数量',
@@ -391,6 +397,7 @@ window.__ModuleLoader__.load({
       const current = value && typeof value === 'object' ? value : {};
       return {
         enable: current.enable_memory !== false,
+        autoRecall: current.enable_auto_recall !== false,
         ragPath: String(current.rag_path ?? ''),
         pythonPath: String(current.python_path ?? ''),
         hfHomePath: String(current.hf_home_path ?? ''),
@@ -440,6 +447,7 @@ window.__ModuleLoader__.load({
         apiKey,
         baseUrl,
         autoRebuild: Boolean(draft.autoRebuild),
+        autoRecall: Boolean(draft.autoRecall),
         holographic: Boolean(draft.holographic),
       };
     }
@@ -636,6 +644,7 @@ window.__ModuleLoader__.load({
         setError('');
         const bridgePayload = {
           enable_memory: draft.enable,
+          enable_auto_recall: parsed.autoRecall,
           rag_path: String(draft.ragPath || '').trim(),
           python_path: String(draft.pythonPath || '').trim(),
           hf_home_path: String(draft.hfHomePath || '').trim(),
@@ -656,6 +665,11 @@ window.__ModuleLoader__.load({
                 op: 'set',
                 path: ['enable_memory'],
                 value: draft.enable,
+              },
+              {
+                op: 'set',
+                path: ['enable_auto_recall'],
+                value: parsed.autoRecall,
               },
               {
                 op: 'set',
@@ -794,6 +808,22 @@ window.__ModuleLoader__.load({
               disabled,
               label: tr('enable'),
               onChange: (value) => edit({ enable: value }),
+            }),
+          ),
+          h(
+            'div',
+            { className: 'am-row' },
+            h(
+              'div',
+              { className: 'am-copy' },
+              h('div', { className: 'am-label' }, tr('autoRecall')),
+              h('div', { className: 'am-hint' }, tr('autoRecallHint')),
+            ),
+            h(Toggle, {
+              checked: draft.autoRecall,
+              disabled: disabled || !draft.enable,
+              label: tr('autoRecall'),
+              onChange: (value) => edit({ autoRecall: value }),
             }),
           ),
           h(

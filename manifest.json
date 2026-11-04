@@ -18,6 +18,13 @@
         "default": true,
         "ui:widget": "toggle"
       },
+      "enable_auto_recall": {
+        "type": "boolean",
+        "title": "Auto-recall before each turn",
+        "description": "Inject a small optional memory hint before the first model step when a highly relevant memory exists. Disable to skip automatic retrieval while keeping memory_search available.",
+        "default": true,
+        "ui:widget": "toggle"
+      },
       "rag_path": {
         "type": "string",
         "title": "Vector database path",
@@ -113,6 +120,7 @@
     "additionalProperties": false,
     "required": [
       "enable_memory",
+      "enable_auto_recall",
       "rag_path",
       "python_path",
       "hf_home_path",
@@ -130,6 +138,13 @@
         "type": "boolean",
         "title": "Enable long-term memory",
         "description": "Turn Chroma-backed memory retrieval on or off.",
+        "default": true,
+        "ui:widget": "toggle"
+      },
+      "enable_auto_recall": {
+        "type": "boolean",
+        "title": "Auto-recall before each turn",
+        "description": "Inject optional memory hints before the first model step only when a highly relevant memory exists. memory_search remains available when disabled.",
         "default": true,
         "ui:widget": "toggle"
       },
