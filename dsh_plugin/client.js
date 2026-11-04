@@ -559,6 +559,11 @@ window.__ModuleLoader__.load({
               },
               {
                 op: 'set',
+                path: ['rag_path'],
+                value: String(draft.ragPath || '').trim(),
+              },
+              {
+                op: 'set',
                 path: ['max_window_tokens'],
                 value: parsed.max,
               },
