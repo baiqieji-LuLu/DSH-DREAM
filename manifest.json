@@ -1,6 +1,6 @@
 {
   "name": "DSH-DREAM",
-  "version": "0.2.0",
+  "version": "0.2.1",
   "description": "Persistent long-term memory for LLM agents with a DSH-native settings panel.",
   "entry_point": "agent_memory.plugin_entry",
   "dshPlugin": "dsh_plugin",

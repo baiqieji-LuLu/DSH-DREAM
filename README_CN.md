@@ -1,6 +1,6 @@
 # DSH-DREAM
 
-> Status: v0.2.0 Pre-Alpha
+> Status: v0.2.1 Pre-Alpha
 
 **DSH-DREAM: Durable RAG-Enhanced Agent Memory**
 

@@ -1,6 +1,6 @@
 {
   "name": "@local/dsh-dream-settings",
-  "version": "0.2.0",
+  "version": "0.2.1",
   "private": true,
   "type": "module",
   "main": "./dsh_plugin/index.js",
