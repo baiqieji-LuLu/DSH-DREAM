@@ -42,7 +42,7 @@ if TYPE_CHECKING:
     from .renderer import render_prompt
     from .window_manager import WindowManager
 
-__version__: Final = "0.4.0"
+__version__: Final = "0.5.0"
 
 #: Mapping of public name -> (implementation module, attribute name).
 _LAZY_IMPORTS: Final[dict[str, tuple[str, str]]] = {

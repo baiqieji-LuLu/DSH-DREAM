@@ -32,6 +32,8 @@ import urllib.request
 import uuid
 from collections.abc import Iterable, Mapping, Sequence
 from dataclasses import dataclass
+
+from .storage.chroma_backend import ChromaVectorBackend
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Final, Literal, TypeAlias, cast
@@ -323,6 +325,7 @@ class RAGStore:
         collection_name: str = "agent_memory",
         *,
         embedding_function: Any | None = None,
+        embedding_backend: Any | None = None,
         client: Any | None = None,
         model_name: str = _DEFAULT_MODEL,
         device: str | None = None,
@@ -368,7 +371,12 @@ class RAGStore:
         self._collection: Any = None
         self._client_shared = False
         self._client_key = ""
-        self._custom_embedding = embedding_function is not None or client is not None
+        self._embedding_backend = embedding_backend
+        self._custom_embedding = (
+            embedding_function is not None
+            or embedding_backend is not None
+            or client is not None
+        )
         self._query_instruction = ""
         # Lazy caches for the exact Flat scan, full-corpus BM25, and RRF.
         self._corpus_ids: list[str] | None = None
@@ -382,6 +390,11 @@ class RAGStore:
         active_client = client if client is not None else self._create_client()
         self._client = active_client
         active_embedding = embedding_function
+        if embedding_backend is not None:
+            active_embedding = embedding_backend.embed_documents
+            self._model_name = str(
+                getattr(embedding_backend, "model_name", model_name)
+            )
         if active_embedding is None and client is None:
             if provider == "openai_compatible":
                 if not embedding_base_url.strip():
@@ -427,6 +440,7 @@ class RAGStore:
             collection_metadata,
             new_dimension,
         )
+        self._backend = ChromaVectorBackend(self._collection, self._collection_name)
 
     @property
     def persist_directory(self) -> Path:
@@ -459,6 +473,9 @@ class RAGStore:
 
     def _probe_embedding_dimension(self) -> int | None:
         """Measure the active model with the short ``dimension_check`` text."""
+        if self._embedding_backend is not None:
+            dimension = int(getattr(self._embedding_backend, "dimension", 0) or 0)
+            return dimension if dimension > 0 else None
         if self._embedding_function is None:
             return None
         try:
@@ -780,7 +797,7 @@ class RAGStore:
         stored_metadata["content_sha256"] = hashlib.sha256(text.encode("utf-8")).hexdigest()
 
         with self._lock:
-            self._collection.add(
+            self._backend.add(
                 ids=[record_id],
                 documents=[text],
                 metadatas=[stored_metadata],
@@ -832,7 +849,7 @@ class RAGStore:
         with self._lock:
             for start in range(0, len(record_ids), _MAX_ADD_BATCH_SIZE):
                 stop = start + _MAX_ADD_BATCH_SIZE
-                self._collection.add(
+                self._backend.add(
                     ids=record_ids[start:stop],
                     documents=texts[start:stop],
                     metadatas=metadatas[start:stop],
@@ -958,19 +975,24 @@ class RAGStore:
         # HNSW fallback for large collections, injected test clients, or
         # environments without numpy.
         with self._lock:
-            encoded_query = (
-                f"{self._query_instruction}{query_text}"
-                if self._query_instruction
-                else query_text
-            )
             query_args: dict[str, Any] = {
-                "query_texts": [encoded_query],
                 "n_results": min(top_k, total),
                 "include": ["documents", "metadatas", "distances"],
             }
+            if self._embedding_backend is not None:
+                query_args["query_embeddings"] = [
+                    self._embedding_backend.embed_query(query_text)
+                ]
+            else:
+                encoded_query = (
+                    f"{self._query_instruction}{query_text}"
+                    if self._query_instruction
+                    else query_text
+                )
+                query_args["query_texts"] = [encoded_query]
             if selected_types is not None:
                 query_args["where"] = self._source_filter(selected_types)
-            result = self._collection.query(**query_args)
+            result = self._backend.query(**query_args)
         return self._parse_hits(result)
 
     def _ensure_corpus_cache(self) -> bool:
@@ -1002,7 +1024,7 @@ class RAGStore:
                     include = ["documents", "metadatas"]
                     if include_embeddings:
                         include.append("embeddings")
-                    raw = self._collection.get(
+                    raw = self._backend.get(
                         limit=5000,
                         offset=offset,
                         include=include,
@@ -1083,17 +1105,23 @@ class RAGStore:
             return None
         if not self._corpus_ids:
             return []
-        if self._embedding_function is None:
-            return None
-        encoded_query = (
-            f"{self._query_instruction}{query_text}"
-            if self._query_instruction
-            else query_text
-        )
-        query_vector = np.asarray(
-            self._embedding_function([encoded_query])[0],
-            dtype=np.float32,
-        )
+        if self._embedding_backend is not None:
+            query_vector = np.asarray(
+                self._embedding_backend.embed_query(query_text),
+                dtype=np.float32,
+            )
+        else:
+            if self._embedding_function is None:
+                return None
+            encoded_query = (
+                f"{self._query_instruction}{query_text}"
+                if self._query_instruction
+                else query_text
+            )
+            query_vector = np.asarray(
+                self._embedding_function([encoded_query])[0],
+                dtype=np.float32,
+            )
         norm = float(np.linalg.norm(query_vector))
         if norm == 0:
             return []
@@ -1446,7 +1474,7 @@ class RAGStore:
         """
         record_id = self._validate_memory_id(memory_id, allow_none=False)
         with self._lock:
-            result = self._collection.get(
+            result = self._backend.get(
                 ids=[record_id],
                 include=["documents", "metadatas"],
             )
@@ -1462,7 +1490,7 @@ class RAGStore:
         if existing is None:
             return False
         with self._lock:
-            self._collection.delete(ids=[existing.memory_id])
+            self._backend.delete(ids=[existing.memory_id])
             self._invalidate_search_caches()
         return True
 
@@ -1479,7 +1507,7 @@ class RAGStore:
     def count(self) -> int:
         """Return the number of stored records."""
         with self._lock:
-            value = self._collection.count()
+            value = self._backend.count()
         if isinstance(value, bool) or not isinstance(value, int):
             raise RAGStoreError("Chroma returned a non-integer collection count")
         if value < 0:
