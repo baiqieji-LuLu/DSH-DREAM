@@ -47,12 +47,10 @@ function buildSearchTool({ queryMemory, diag }) {
       },
       top_k: {
         type: "integer",
-        required: false,
         description: "Maximum results, 1-20.",
       },
       timeline_mode: {
         type: "boolean",
-        required: false,
         description:
           "Return chronological raw memories instead of collapsing state changes.",
       },
@@ -116,7 +114,6 @@ function buildAddTurnTool({ writeTurn, diag }) {
       },
       extracted_fact: {
         type: "string",
-        required: false,
         description: "Optional concise fact label for the same turn.",
       },
     },
