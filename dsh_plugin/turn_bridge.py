@@ -14,6 +14,7 @@ import importlib.util
 import json
 import os
 import re
+import subprocess
 import sys
 from pathlib import Path
 
@@ -37,9 +38,15 @@ def _python_candidates():
     ]
     for root in dict.fromkeys(roots):
         candidates = (
-            [root / ".venv" / "Scripts" / "python.exe"]
+            [
+                root / ".dream-venv" / "Scripts" / "python.exe",
+                root / ".venv" / "Scripts" / "python.exe",
+            ]
             if os.name == "nt"
-            else [root / ".venv" / "bin" / "python"]
+            else [
+                root / ".dream-venv" / "bin" / "python",
+                root / ".venv" / "bin" / "python",
+            ]
         )
         yield from candidates
 
@@ -70,6 +77,63 @@ def _maybe_reexec_with_venv() -> None:
 
 
 _maybe_reexec_with_venv()
+
+
+def _dream_venv_python() -> Path:
+    configured = os.environ.get("DSH_DREAM_VENV", "").strip()
+    if configured:
+        venv = Path(configured).expanduser()
+    else:
+        dsh_home = os.environ.get("DSH_HOME", "").strip()
+        home = Path(dsh_home).expanduser() if dsh_home else (Path.home() / ".dsh")
+        venv = home / "profiles" / "desktop" / ".dream-venv"
+    return (
+        venv / "Scripts" / "python.exe"
+        if os.name == "nt"
+        else venv / "bin" / "python"
+    )
+
+
+def _auto_provision_if_needed() -> None:
+    """Standalone fallback when the Host did not provision the venv."""
+    if os.environ.get("DSH_DREAM_HOST_PROVISION") == "1":
+        return
+    if os.environ.get("DSH_DREAM_AUTO_PROVISION") == "0":
+        return
+    if _runtime_available():
+        return
+    target = _dream_venv_python()
+    try:
+        if not target.is_file():
+            subprocess.run(
+                [sys.executable, "-m", "venv", str(target.parent.parent)],
+                check=True,
+                timeout=900,
+            )
+        subprocess.run(
+            [
+                str(target),
+                "-m",
+                "pip",
+                "install",
+                "--disable-pip-version-check",
+                "--no-input",
+                "--index-url",
+                "https://pypi.tuna.tsinghua.edu.cn/simple",
+                "chromadb",
+                "sentence-transformers",
+            ],
+            check=True,
+            timeout=1800,
+        )
+    except (OSError, subprocess.SubprocessError):
+        return
+    if target.is_file():
+        os.environ["DSH_DREAM_REEXEC"] = "1"
+        os.execv(str(target), [str(target), "-u", str(Path(__file__).resolve())])
+
+
+_auto_provision_if_needed()
 
 
 # Use a writable cache. A marketplace install lives under the read-only

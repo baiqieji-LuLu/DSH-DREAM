@@ -57,6 +57,11 @@ const DSH_HOME = resolve(
 const PROFILE_DIR = resolve(
   process.env.DSH_PROFILE_DIR || resolve(DSH_HOME, "profiles", "desktop"),
 );
+const DREAM_VENV = resolve(
+  process.env.DSH_DREAM_VENV || resolve(PROFILE_DIR, ".dream-venv"),
+);
+const PIP_MIRROR = "https://pypi.tuna.tsinghua.edu.cn/simple";
+
 /** Verify a cache directory is actually writable before using it. */
 function writableCacheDir(directory) {
   try {
@@ -110,12 +115,16 @@ function resolvePython(configured = "") {
   const roots = [
     process.env.DSH_DREAM_ROOT,
     PROJECT_ROOT,
+    PROFILE_DIR,
     process.cwd(),
   ].filter(Boolean);
   const venvPaths =
     process.platform === "win32"
-      ? [".venv\\Scripts\\python.exe"]
-      : [".venv/bin/python"];
+      ? [
+          ".dream-venv\\Scripts\\python.exe",
+          ".venv\\Scripts\\python.exe",
+        ]
+      : [".dream-venv/bin/python", ".venv/bin/python"];
 
   for (const root of new Set(roots)) {
     for (const relative of venvPaths) {
@@ -437,9 +446,19 @@ export function apply(ctx, config) {
     let turnBridge = null;
     let turnBridgeBuffer = "";
     let bridgeColdStart = true;
+    let provisionPromise = null;
+    let provisionState = {
+      status: "idle",
+      python: "",
+      venv: DREAM_VENV,
+      error: "",
+    };
 
     const ensureTurnBridge = () => {
       if (turnBridge && !turnBridge.killed) return turnBridge;
+      if (!["ready", "installed"].includes(provisionState.status)) {
+        return null;
+      }
       try {
         const bridgeConfig = readBridgeFile(target);
         const python = resolvePython(bridgeConfig?.python_path);
@@ -456,6 +475,7 @@ export function apply(ctx, config) {
             AGENT_MEMORY_CONFIG: target,
             DSH_DREAM_CONFIG: target,
             DSH_DREAM_PYTHON: python,
+            DSH_DREAM_HOST_PROVISION: "1",
             DSH_DREAM_HF_CACHE: cache.path,
             HF_HOME: cache.path,
             HF_HUB_CACHE: resolve(cache.path, "hub"),
@@ -681,6 +701,164 @@ export function apply(ctx, config) {
         );
       });
 
+    const runProcess = (command, args, extraEnv = {}) =>
+      new Promise((resolve, reject) => {
+        let child = null;
+        try {
+          child = spawn(command, args, {
+            cwd: PROJECT_ROOT,
+            env: { ...process.env, ...extraEnv },
+            windowsHide: true,
+            stdio: ["ignore", "pipe", "pipe"],
+          });
+        } catch (error) {
+          reject(error);
+          return;
+        }
+        let stdout = "";
+        let stderr = "";
+        const timer = setTimeout(() => {
+          try {
+            child.kill();
+          } catch {
+            // Ignore cleanup failure.
+          }
+          reject(new Error(`provisioning timed out: ${command} ${args.join(" ")}`));
+        }, 15 * 60 * 1000);
+        child.stdout.setEncoding("utf8");
+        child.stderr.setEncoding("utf8");
+        child.stdout.on("data", (chunk) => {
+          stdout += chunk;
+        });
+        child.stderr.on("data", (chunk) => {
+          stderr += chunk;
+        });
+        child.on("error", (error) => {
+          clearTimeout(timer);
+          reject(error);
+        });
+        child.on("close", (code) => {
+          clearTimeout(timer);
+          if (code === 0) resolve({ stdout, stderr });
+          else {
+            reject(
+              new Error(
+                `${command} exited ${code}: ${(stderr || stdout).trim().slice(-800)}`,
+              ),
+            );
+          }
+        });
+      });
+
+    const venvPythonPath = () =>
+      process.platform === "win32"
+        ? resolve(DREAM_VENV, "Scripts", "python.exe")
+        : resolve(DREAM_VENV, "bin", "python");
+
+    /**
+     * Detect missing packages and, when necessary, create a private venv under
+     * the user's DSH profile and install the runtime dependencies there.
+     */
+    const ensureProvisioned = () => {
+      if (provisionPromise) return provisionPromise;
+      provisionPromise = (async () => {
+        const bridgeConfig = readBridgeFile(target);
+        const cache = resolveCache(bridgeConfig?.hf_home_path);
+        if (!cache.path) {
+          provisionState = {
+            status: "error",
+            python: resolvePython(bridgeConfig?.python_path),
+            venv: DREAM_VENV,
+            error: cache.error,
+          };
+          return provisionState;
+        }
+        provisionState = {
+          ...provisionState,
+          status: "checking",
+          python: resolvePython(bridgeConfig?.python_path),
+        };
+        const probe = await probeRuntime(
+          bridgeConfig?.python_path,
+          bridgeConfig?.hf_home_path,
+        );
+        if (probe.ok) {
+          provisionState = {
+            status: "ready",
+            python: probe.python || provisionState.python,
+            venv: DREAM_VENV,
+            error: "",
+          };
+          return provisionState;
+        }
+        if (process.env.DSH_DREAM_AUTO_PROVISION === "0") {
+          provisionState = {
+            status: "error",
+            python: probe.python || provisionState.python,
+            venv: DREAM_VENV,
+            error: "auto-provisioning disabled by DSH_DREAM_AUTO_PROVISION=0",
+          };
+          return provisionState;
+        }
+
+        provisionState = {
+          ...provisionState,
+          status: "provisioning",
+          python: probe.python || provisionState.python,
+        };
+        const basePython = resolvePython(bridgeConfig?.python_path);
+        const venvPython = venvPythonPath();
+        try {
+          if (!existsSync(venvPython)) {
+            await runProcess(basePython, ["-m", "venv", DREAM_VENV]);
+          }
+          await runProcess(
+            venvPython,
+            [
+              "-m",
+              "pip",
+              "install",
+              "--disable-pip-version-check",
+              "--no-input",
+              "--index-url",
+              PIP_MIRROR,
+              "chromadb",
+              "sentence-transformers",
+            ],
+            {
+              PIP_DISABLE_PIP_VERSION_CHECK: "1",
+              DSH_DREAM_HF_CACHE: cache.path,
+              HF_HOME: cache.path,
+            },
+          );
+          provisionState = {
+            status: "installed",
+            python: venvPython,
+            venv: DREAM_VENV,
+            error: "",
+          };
+          if (turnBridge && !turnBridge.killed) {
+            try {
+              turnBridge.kill();
+            } catch {
+              // New process will be started on demand.
+            }
+            turnBridge = null;
+            bridgeColdStart = true;
+          }
+        } catch (error) {
+          provisionState = {
+            status: "error",
+            python: basePython,
+            venv: DREAM_VENV,
+            error: String(error),
+          };
+        }
+        return provisionState;
+      })();
+      return provisionPromise;
+    };
+
     const resultText = (result) => {
       const hits = Array.isArray(result?.results) ? result.results : [];
       const lines = hits
@@ -754,13 +932,25 @@ export function apply(ctx, config) {
       };
     };
 
-    // Silent cold-start warmup: start the bridge and let the Python warmup
-    // request import the model in the background, without blocking activation.
-    try {
-      ensureTurnBridge();
-    } catch (error) {
-      diag(`background warmup failed: ${error?.stack || error}`);
-    }
+    // Silent cold-start warmup: provision if needed, then start the bridge and
+    // let the Python warmup request import the model in the background.
+    ensureProvisioned()
+      .then(() => {
+        if (
+          provisionState.status === "provisioning" ||
+          provisionState.status === "error"
+        ) {
+          return;
+        }
+        try {
+          ensureTurnBridge();
+        } catch (error) {
+          diag(`background warmup failed: ${error?.stack || error}`);
+        }
+      })
+      .catch((error) => {
+        diag(`background provisioning failed: ${error?.stack || error}`);
+      });
 
     const onSessionEvent = (session, event) => {
       if (!session || !event || !event.type) return;
@@ -1036,7 +1226,12 @@ export function apply(ctx, config) {
                   bridgeConfig?.hf_home_path,
                 );
                 res.writeHead(200, { "content-type": "application/json" });
-                res.end(JSON.stringify(status));
+                res.end(
+                  JSON.stringify({
+                    ...status,
+                    provision: provisionState,
+                  }),
+                );
               } catch (error) {
                 res.writeHead(500, { "content-type": "application/json" });
                 res.end(JSON.stringify({ ok: false, error: String(error) }));

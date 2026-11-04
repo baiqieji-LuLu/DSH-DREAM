@@ -43,6 +43,8 @@ window.__ModuleLoader__.load({
       hfHomePlaceholder: 'Auto-detect a writable cache',
       runtimeCheck: 'Runtime check',
       runtimeChecking: 'Checking Python runtime…',
+      runtimeProvisioning: 'Provisioning Python dependencies for first run…',
+      runtimeInstalled: 'Dependencies are installed. Restart DSH to continue.',
       runtimeOk: 'Python runtime is ready.',
       runtimeMissing: 'Missing Python packages:',
       runtimeCacheError:
@@ -115,6 +117,8 @@ window.__ModuleLoader__.load({
       hfHomePlaceholder: '自动寻找可写缓存目录',
       runtimeCheck: '运行环境检查',
       runtimeChecking: '正在检查 Python 运行环境…',
+      runtimeProvisioning: '正在为首次运行装配依赖...',
+      runtimeInstalled: '依赖装配完成，请重启 DSH。',
       runtimeOk: 'Python 运行环境正常。',
       runtimeMissing: '缺少 Python 依赖：',
       runtimeCacheError: '模型缓存目录不可写，请手动在设置中指定目录',
@@ -482,27 +486,46 @@ window.__ModuleLoader__.load({
         state: 'checking',
         missing: [],
         cacheError: '',
+        provisionStatus: '',
       });
 
       React.useEffect(() => {
         let active = true;
-        fetch('/dsh-dream/runtime', { credentials: 'same-origin' })
-          .then((response) => response.json())
-          .then((result) => {
-            if (!active) return;
-            setRuntime({
-              state: result?.ok ? 'ok' : 'missing',
-              missing: Array.isArray(result?.missing) ? result.missing : [],
-              cacheError: result?.cache?.error || '',
+        let timer = null;
+        const load = () => {
+          fetch('/dsh-dream/runtime', { credentials: 'same-origin' })
+            .then((response) => response.json())
+            .then((result) => {
+              if (!active) return;
+              const provisionStatus = result?.provision?.status || '';
+              setRuntime({
+                state: result?.ok ? 'ok' : 'missing',
+                missing: Array.isArray(result?.missing) ? result.missing : [],
+                cacheError: result?.cache?.error || '',
+                provisionStatus,
+              });
+              if (
+                provisionStatus === 'provisioning' ||
+                provisionStatus === 'checking'
+              ) {
+                timer = setTimeout(load, 3000);
+              }
+            })
+            .catch(() => {
+              if (active) {
+                setRuntime({
+                  state: 'unknown',
+                  missing: [],
+                  cacheError: '',
+                  provisionStatus: '',
+                });
+              }
             });
-          })
-          .catch(() => {
-            if (active) {
-              setRuntime({ state: 'unknown', missing: [], cacheError: '' });
-            }
-          });
+        };
+        load();
         return () => {
           active = false;
+          if (timer) clearTimeout(timer);
         };
       }, []);
 
@@ -546,15 +569,19 @@ window.__ModuleLoader__.load({
       const pythonPath = String(draft.pythonPath || '');
       const hfHomePath = String(draft.hfHomePath || '');
       const runtimeText =
-        runtime.state === 'checking'
-          ? tr('runtimeChecking')
-          : runtime.cacheError
-            ? tr('runtimeCacheError')
-            : runtime.state === 'ok'
-              ? tr('runtimeOk')
-              : runtime.state === 'missing'
-                ? `${tr('runtimeMissing')} ${runtime.missing.join(', ')}`.trim()
-                : tr('runtimeUnknown');
+        runtime.provisionStatus === 'provisioning'
+          ? tr('runtimeProvisioning')
+          : runtime.provisionStatus === 'installed'
+            ? tr('runtimeInstalled')
+            : runtime.state === 'checking'
+              ? tr('runtimeChecking')
+              : runtime.cacheError
+                ? tr('runtimeCacheError')
+                : runtime.state === 'ok'
+                  ? tr('runtimeOk')
+                  : runtime.state === 'missing'
+                    ? `${tr('runtimeMissing')} ${runtime.missing.join(', ')}`.trim()
+                    : tr('runtimeUnknown');
 
       const pushBridge = async (payload) => {
         console.log('🔥 [Client] 推送配置到 Host', {
