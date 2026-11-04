@@ -72,17 +72,36 @@ def _maybe_reexec_with_venv() -> None:
 _maybe_reexec_with_venv()
 
 
-# Prefer the project-local cache when present; otherwise leave the host's
-# HF_HOME untouched so npm-installed plugins can use a global model cache.
-_LOCAL_HF_CACHE = _PROJECT_ROOT / ".hf-cache"
-if _LOCAL_HF_CACHE.is_dir():
-    os.environ["HF_HOME"] = str(_LOCAL_HF_CACHE)
-    os.environ["HF_HUB_CACHE"] = str(_LOCAL_HF_CACHE / "hub")
-    os.environ["HF_HUB_OFFLINE"] = "1"
-    os.environ["TRANSFORMERS_OFFLINE"] = "1"
-    os.environ["HF_HUB_DISABLE_SYMLINKS"] = "1"
+# Use a writable per-user cache. A marketplace install lives under the
+# read-only profile node_modules tree, so never assume a plugin-local cache.
+def _cache_root() -> Path:
+    configured = os.environ.get("DSH_DREAM_HF_CACHE", "").strip()
+    if not configured:
+        configured = os.environ.get("HF_HOME", "").strip()
+    if configured:
+        return Path(configured).expanduser()
+    dsh_home = os.environ.get("DSH_HOME", "").strip()
+    home = Path(dsh_home).expanduser() if dsh_home else (Path.home() / ".dsh")
+    return home / "profiles" / "desktop" / ".hf-cache"
 
-from agent_memory.plugin_entry import get_plugin
+
+_HF_CACHE = _cache_root()
+try:
+    _HF_CACHE.mkdir(parents=True, exist_ok=True)
+except OSError:
+    pass
+os.environ["HF_HOME"] = str(_HF_CACHE)
+os.environ["HF_HUB_CACHE"] = str(_HF_CACHE / "hub")
+os.environ["HF_HUB_OFFLINE"] = "0"
+os.environ["TRANSFORMERS_OFFLINE"] = "0"
+os.environ["HF_HUB_DISABLE_SYMLINKS"] = "1"
+
+_PLUGIN_IMPORT_ERROR: str | None = None
+try:
+    from agent_memory.plugin_entry import get_plugin
+except Exception as exc:  # keep the bridge alive to explain the failure
+    _PLUGIN_IMPORT_ERROR = f"{type(exc).__name__}: {exc}"
+    get_plugin = None  # type: ignore[assignment]
 
 _SYSTEM_PREFIX = re.compile(
     r"^\s*(Time sampled|Current runtime context|Environment:|System:)\b",
@@ -117,6 +136,37 @@ def main() -> int:
         sys.stdout.reconfigure(encoding="utf-8")
     if hasattr(sys.stderr, "reconfigure"):
         sys.stderr.reconfigure(encoding="utf-8")
+    if _PLUGIN_IMPORT_ERROR is not None:
+        print(
+            f"[Bridge] Python dependency error: {_PLUGIN_IMPORT_ERROR}",
+            file=sys.stderr,
+            flush=True,
+        )
+        for raw in sys.stdin:
+            request_id = None
+            try:
+                payload = json.loads(raw.strip())
+                if isinstance(payload, dict):
+                    request_id = payload.get("request_id")
+            except Exception:
+                pass
+            print(
+                json.dumps(
+                    {
+                        "request_id": request_id,
+                        "ok": False,
+                        "code": "PYTHON_DEPENDENCY_ERROR",
+                        "error": "Python environment is missing required DSH-DREAM packages.",
+                        "detail": _PLUGIN_IMPORT_ERROR,
+                        "python": sys.executable,
+                        "hf_home": str(_HF_CACHE),
+                        "hint": "Set DSH_DREAM_PYTHON to a Python with chromadb and sentence-transformers installed, or run pip install -e \".[dev]\" in the DSH-DREAM checkout.",
+                    },
+                    ensure_ascii=False,
+                ),
+                flush=True,
+            )
+        return 0
     for raw in sys.stdin:
         line = raw.strip()
         if not line:

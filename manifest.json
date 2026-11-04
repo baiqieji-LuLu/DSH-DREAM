@@ -25,6 +25,13 @@
         "default": "",
         "ui:widget": "text"
       },
+      "python_path": {
+        "type": "string",
+        "title": "Python interpreter path",
+        "description": "Optional absolute path to a Python with chromadb and sentence-transformers; leave blank to auto-detect an adjacent .venv or PATH.",
+        "default": "",
+        "ui:widget": "text"
+      },
       "max_window_tokens": {
         "type": "integer",
         "title": "Window token budget",
@@ -100,6 +107,7 @@
     "required": [
       "enable_memory",
       "rag_path",
+      "python_path",
       "max_window_tokens",
       "retrieval_top_k",
       "embedding_provider",
@@ -121,6 +129,13 @@
         "type": "string",
         "title": "Vector database path",
         "description": "Leave blank to use the DSH user directory; enter an absolute path to customize, or set AGENT_MEMORY_RAG_PATH to override.",
+        "default": "",
+        "ui:widget": "text"
+      },
+      "python_path": {
+        "type": "string",
+        "title": "Python interpreter path",
+        "description": "Optional absolute path to a Python with chromadb and sentence-transformers; leave blank to auto-detect an adjacent .venv or PATH.",
         "default": "",
         "ui:widget": "text"
       },

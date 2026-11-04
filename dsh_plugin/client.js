@@ -33,6 +33,15 @@ window.__ModuleLoader__.load({
       ragPath: 'Chroma persistence path',
       ragPathHint:
         "Leave blank to use the DSH user directory; enter an absolute path to customize, or set AGENT_MEMORY_RAG_PATH to override.",
+      pythonPath: 'Python interpreter path',
+      pythonPathHint:
+        'Optional absolute path to a Python with chromadb and sentence-transformers. Leave blank to auto-detect an adjacent .venv or PATH, then restart DSH.',
+      pythonPathPlaceholder: 'Auto-detect .venv or PATH',
+      runtimeCheck: 'Runtime check',
+      runtimeChecking: 'Checking Python runtime…',
+      runtimeOk: 'Python runtime is ready.',
+      runtimeMissing: 'Missing Python packages:',
+      runtimeUnknown: 'Python runtime could not be checked.',
       embeddingTitle: 'Embedding model (advanced)',
       embeddingWarning:
         '⚠️ 警告：更换 Embedding 模型会改变向量维度！修改此项后，系统将尝试无损重嵌入旧数据（或要求您手动清空旧 RAG 数据库），否则新记忆将无法与旧记忆一起被检索！',
@@ -90,6 +99,15 @@ window.__ModuleLoader__.load({
       ragPath: 'Chroma 持久化路径',
       ragPathHint:
         '留空则默认存储在 DSH 用户目录下；如需自定义，请填入绝对路径，或通过环境变量 AGENT_MEMORY_RAG_PATH 覆盖。',
+      pythonPath: 'Python 解释器路径',
+      pythonPathHint:
+        '可选。填写已安装 chromadb 与 sentence-transformers 的 Python 绝对路径；留空则自动查找相邻 .venv 或系统 PATH，修改后需重启 DSH。',
+      pythonPathPlaceholder: '自动查找 .venv 或 PATH',
+      runtimeCheck: '运行环境检查',
+      runtimeChecking: '正在检查 Python 运行环境…',
+      runtimeOk: 'Python 运行环境正常。',
+      runtimeMissing: '缺少 Python 依赖：',
+      runtimeUnknown: '无法检查 Python 运行环境。',
       embeddingTitle: 'Embedding 模型（高阶）',
       embeddingWarning:
         '⚠️ 警告：更换 Embedding 模型会改变向量维度！修改此项后，系统将尝试无损重嵌入旧数据（或要求您手动清空旧 RAG 数据库），否则新记忆将无法与旧记忆一起被检索！',
@@ -358,6 +376,7 @@ window.__ModuleLoader__.load({
       return {
         enable: current.enable_memory !== false,
         ragPath: String(current.rag_path ?? ''),
+        pythonPath: String(current.python_path ?? ''),
         max: String(current.max_window_tokens ?? 1500),
         top: String(current.retrieval_top_k ?? 5),
         embeddingProvider:
@@ -447,6 +466,29 @@ window.__ModuleLoader__.load({
       const [saving, setSaving] = React.useState(false);
       const [saved, setSaved] = React.useState(false);
       const [error, setError] = React.useState('');
+      const [runtime, setRuntime] = React.useState({
+        state: 'checking',
+        missing: [],
+      });
+
+      React.useEffect(() => {
+        let active = true;
+        fetch('/dsh-dream/runtime', { credentials: 'same-origin' })
+          .then((response) => response.json())
+          .then((result) => {
+            if (!active) return;
+            setRuntime({
+              state: result?.ok ? 'ok' : 'missing',
+              missing: Array.isArray(result?.missing) ? result.missing : [],
+            });
+          })
+          .catch(() => {
+            if (active) setRuntime({ state: 'unknown', missing: [] });
+          });
+        return () => {
+          active = false;
+        };
+      }, []);
 
       React.useEffect(() => {
         if (snapshot.status === 'ready' && !dirty) {
@@ -485,6 +527,15 @@ window.__ModuleLoader__.load({
       const writable = snapshot.writable !== false;
       const disabled = !writable || saving;
       const ragPath = String(draft.ragPath || '');
+      const pythonPath = String(draft.pythonPath || '');
+      const runtimeText =
+        runtime.state === 'checking'
+          ? tr('runtimeChecking')
+          : runtime.state === 'ok'
+            ? tr('runtimeOk')
+            : runtime.state === 'missing'
+              ? `${tr('runtimeMissing')} ${runtime.missing.join(', ')}`.trim()
+              : tr('runtimeUnknown');
 
       const pushBridge = async (payload) => {
         console.log('🔥 [Client] 推送配置到 Host', {
@@ -539,6 +590,7 @@ window.__ModuleLoader__.load({
         const bridgePayload = {
           enable_memory: draft.enable,
           rag_path: String(draft.ragPath || '').trim(),
+          python_path: String(draft.pythonPath || '').trim(),
           max_window_tokens: parsed.max,
           retrieval_top_k: parsed.top,
           embedding_provider: parsed.provider,
@@ -561,6 +613,11 @@ window.__ModuleLoader__.load({
                 op: 'set',
                 path: ['rag_path'],
                 value: String(draft.ragPath || '').trim(),
+              },
+              {
+                op: 'set',
+                path: ['python_path'],
+                value: String(draft.pythonPath || '').trim(),
               },
               {
                 op: 'set',
@@ -738,7 +795,7 @@ window.__ModuleLoader__.load({
           ),
           h(
             'div',
-            { className: 'am-row am-row-last' },
+            { className: 'am-row' },
             h(
               'div',
               { className: 'am-copy' },
@@ -757,6 +814,43 @@ window.__ModuleLoader__.load({
               placeholder: '',
               onChange: (event) => edit({ ragPath: event.target.value }),
             }),
+          ),
+          h(
+            'div',
+            { className: 'am-row' },
+            h(
+              'div',
+              { className: 'am-copy' },
+              h(
+                'label',
+                { className: 'am-label', htmlFor: 'am-python-path' },
+                tr('pythonPath'),
+              ),
+              h('div', { className: 'am-hint' }, tr('pythonPathHint')),
+            ),
+            h('input', {
+              id: 'am-python-path',
+              className: 'am-input',
+              type: 'text',
+              value: pythonPath,
+              placeholder: tr('pythonPathPlaceholder'),
+              disabled,
+              onChange: (event) => edit({ pythonPath: event.target.value }),
+            }),
+          ),
+          h(
+            'div',
+            {
+              className: 'am-row am-row-last',
+              role: 'status',
+              'aria-live': 'polite',
+            },
+            h(
+              'div',
+              { className: 'am-copy' },
+              h('div', { className: 'am-label' }, tr('runtimeCheck')),
+              h('div', { className: 'am-hint' }, runtimeText),
+            ),
           ),
         ),
         h(

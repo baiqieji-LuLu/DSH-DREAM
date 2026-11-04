@@ -38,16 +38,36 @@ const ENTRY_ID = "dsh-dream-settings";
 /** Files used by the forced holographic turn bridge. */
 const PLUGIN_DIR = dirname(fileURLToPath(import.meta.url));
 const TURN_BRIDGE = resolve(PLUGIN_DIR, "turn_bridge.py");
+const RUNTIME_PROBE = [
+  "import importlib.util,json,sys",
+  "mods=('agent_memory','chromadb','sentence_transformers')",
+  "missing=[m for m in mods if importlib.util.find_spec(m) is None]",
+  "print(json.dumps({'ok':not missing,'missing':missing,'python':sys.executable}))",
+].join("; ");
 
 /** Installed plugin root; never assume a developer checkout path. */
 const PROJECT_ROOT = resolve(process.env.DSH_DREAM_ROOT || resolve(PLUGIN_DIR, ".."));
+
+/** User-scoped DSH data directory; writable even when node_modules is read-only. */
+const DSH_HOME = resolve(
+  process.env.DSH_HOME ||
+    resolve(process.env.USERPROFILE || process.env.HOME || ".", ".dsh"),
+);
+const PROFILE_DIR = resolve(
+  process.env.DSH_PROFILE_DIR || resolve(DSH_HOME, "profiles", "desktop"),
+);
+const HF_HOME = resolve(
+  process.env.DSH_DREAM_HF_CACHE || resolve(PROFILE_DIR, ".hf-cache"),
+);
 
 /**
  * Resolve the interpreter without hard-coding a machine-specific path:
  * explicit env override -> adjacent project/working-directory venv -> PATH.
  */
-function resolvePython() {
-  const explicit = String(process.env.DSH_DREAM_PYTHON || "").trim();
+function resolvePython(configured = "") {
+  const explicit = String(
+    process.env.DSH_DREAM_PYTHON || configured || "",
+  ).trim();
   if (explicit) return explicit;
 
   const roots = [
@@ -176,6 +196,14 @@ export const Config = z.object({
     )
     .volatile(),
 
+  python_path: z
+    .string()
+    .default("")
+    .description(
+      "Optional path to a Python interpreter with chromadb and sentence-transformers; leave blank to auto-detect an adjacent .venv or PATH.",
+    )
+    .volatile(),
+
   max_window_tokens: z
     .natural()
     .min(128)
@@ -263,6 +291,7 @@ function normalizePayload(raw) {
     // the backend resolves the per-user DSH data directory (and honors
     // AGENT_MEMORY_RAG_PATH) when this field is blank.
     rag_path: String(current(value.rag_path) ?? "").trim(),
+    python_path: String(current(value.python_path) ?? "").trim(),
     max_window_tokens: Number(current(value.max_window_tokens) ?? 1500),
     retrieval_top_k: Number(current(value.retrieval_top_k) ?? 5),
     embedding_provider:
@@ -365,12 +394,20 @@ export function apply(ctx, config) {
     const ensureTurnBridge = () => {
       if (turnBridge && !turnBridge.killed) return turnBridge;
       try {
-        turnBridge = spawn(PYTHON, ["-u", TURN_BRIDGE], {
+        const bridgeConfig = readBridgeFile(target);
+        const python = resolvePython(bridgeConfig?.python_path);
+        turnBridge = spawn(python, ["-u", TURN_BRIDGE], {
           cwd: PROJECT_ROOT,
           env: {
             ...process.env,
             AGENT_MEMORY_CONFIG: target,
             DSH_DREAM_CONFIG: target,
+            DSH_DREAM_PYTHON: python,
+            DSH_DREAM_HF_CACHE: HF_HOME,
+            HF_HOME,
+            HF_HUB_CACHE: resolve(HF_HOME, "hub"),
+            HF_HUB_OFFLINE: "0",
+            TRANSFORMERS_OFFLINE: "0",
           },
           stdio: ["pipe", "pipe", "pipe"],
           windowsHide: true,
@@ -389,7 +426,7 @@ export function apply(ctx, config) {
                 const pending = pendingQueries.get(response.request_id);
                 if (pending) {
                   pendingQueries.delete(response.request_id);
-                  pending.resolve(response.ok ? response.result : null);
+                  pending.resolve(response);
                   continue;
                 }
               }
@@ -496,6 +533,78 @@ export function apply(ctx, config) {
         }
       });
 
+    const probeRuntime = (pythonPath, timeoutMs = 5000) =>
+      new Promise((resolve) => {
+        const python = resolvePython(pythonPath);
+        let child = null;
+        let settled = false;
+        let timer = null;
+        const finish = (value) => {
+          if (settled) return;
+          settled = true;
+          if (timer) clearTimeout(timer);
+          if (child && !child.killed) {
+            try {
+              child.kill();
+            } catch {
+              // Probe cleanup must not fail the request.
+            }
+          }
+          resolve(value);
+        };
+        try {
+          child = spawn(python, ["-c", RUNTIME_PROBE], {
+            cwd: PROJECT_ROOT,
+            env: {
+              ...process.env,
+              DSH_DREAM_PYTHON: python,
+              DSH_DREAM_HF_CACHE: HF_HOME,
+              HF_HOME,
+              HF_HUB_CACHE: resolve(HF_HOME, "hub"),
+            },
+            stdio: ["ignore", "pipe", "pipe"],
+            windowsHide: true,
+          });
+        } catch (error) {
+          finish({ ok: false, error: String(error) });
+          return;
+        }
+        let stdout = "";
+        let stderr = "";
+        child.stdout.setEncoding("utf8");
+        child.stderr.setEncoding("utf8");
+        child.stdout.on("data", (chunk) => {
+          stdout += chunk;
+        });
+        child.stderr.on("data", (chunk) => {
+          stderr += chunk;
+        });
+        child.on("error", (error) => finish({ ok: false, error: String(error) }));
+        child.on("close", (code) => {
+          try {
+            const lines = stdout.trim().split(/\r?\n/).filter(Boolean);
+            const payload = JSON.parse(lines.at(-1) || "{}");
+            finish({
+              ok: payload.ok === true,
+              missing: Array.isArray(payload.missing) ? payload.missing : [],
+              python: payload.python || python,
+              code,
+              error: payload.ok === true ? "" : stderr.trim(),
+            });
+          } catch (error) {
+            finish({
+              ok: false,
+              error: `${stderr.trim() || String(error)}`,
+              code,
+            });
+          }
+        });
+        timer = setTimeout(
+          () => finish({ ok: false, error: "runtime probe timed out" }),
+          timeoutMs,
+        );
+      });
+
     const resultText = (result) => {
       const hits = Array.isArray(result?.results) ? result.results : [];
       const lines = hits
@@ -543,7 +652,14 @@ export function apply(ctx, config) {
       const query = queryFromMessages(messages);
       if (!query) return decision;
       const result = await queryMemory(query, 3, 800, signal);
-      const hint = memoryHint(result);
+      if (result?.ok === false) {
+        diag(
+          `pre-retrieval unavailable: ${result.error || "unknown error"}; ` +
+            `python=${result.python || "unknown"}; hf_home=${result.hf_home || "unknown"}`,
+        );
+        return decision;
+      }
+      const hint = memoryHint(result?.result);
       if (!hint || signal?.aborted) return decision;
       const context = createUserMessage({
         content: [{ type: "text", text: hint }],
@@ -779,9 +895,23 @@ export function apply(ctx, config) {
                   exec?.signal,
                   args?.timeline_mode === true,
                 );
+                if (result?.ok === false) {
+                  return {
+                    text: [
+                      "Python environment error:",
+                      result.error || "unknown error",
+                      result.detail || "",
+                      `Python: ${result.python || "unknown"}`,
+                      `HF_HOME: ${result.hf_home || "unknown"}`,
+                      result.hint || "",
+                    ]
+                      .filter(Boolean)
+                      .join("\n"),
+                  };
+                }
                 return {
-                  text: result
-                    ? resultText(result)
+                  text: result?.ok
+                    ? resultText(result.result)
                     : "Memory search timed out or failed; continue without memory.",
                 };
               },
@@ -799,6 +929,26 @@ export function apply(ctx, config) {
     ctx.inject(["webServer"], (child) => {
       child.effect(
         () => {
+          const disposeRuntime = child.webServer.register({
+            kind: "exact",
+            path: "/dsh-dream/runtime",
+            handler: async (req, res) => {
+              if (req.method !== "GET") {
+                res.writeHead(405, { "content-type": "application/json" });
+                res.end(JSON.stringify({ ok: false, error: "GET required" }));
+                return;
+              }
+              try {
+                const bridgeConfig = readBridgeFile(target);
+                const status = await probeRuntime(bridgeConfig?.python_path);
+                res.writeHead(200, { "content-type": "application/json" });
+                res.end(JSON.stringify(status));
+              } catch (error) {
+                res.writeHead(500, { "content-type": "application/json" });
+                res.end(JSON.stringify({ ok: false, error: String(error) }));
+              }
+            },
+          });
           const dispose = child.webServer.register({
             kind: "exact",
             path: "/dsh-dream/config",
@@ -828,7 +978,10 @@ export function apply(ctx, config) {
               }
             },
           });
-          return () => dispose?.();
+          return () => {
+            dispose?.();
+            disposeRuntime?.();
+          };
         },
         "DSH-DREAM.http-bridge",
       );
