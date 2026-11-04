@@ -478,6 +478,8 @@ export class RuntimeEnv {
           "install",
           "--python",
           venvPythonPath(),
+          "-e",
+          PROJECT_ROOT,
           "onnxruntime",
           "tokenizers",
           "sqlite-vec",

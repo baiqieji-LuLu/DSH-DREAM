@@ -83,14 +83,16 @@ function buildSearchTool({ queryMemory, diag }) {
         exec?.signal,
         args?.timeline_mode === true,
       );
-      if (result?.ok === false) {
-        diag(`memory_search dependency error: ${result.error || "unknown"}`);
-        return { text: dependencyError(result) };
+      if (!result || result.ok === false) {
+        diag(
+          `memory_search dependency error: ${
+            result?.error || "bridge unavailable"
+          }`,
+        );
+        throw new Error("Memory engine not ready");
       }
       return {
-        text: result?.ok
-          ? formatMemoryResults(result.result)
-          : "Memory search timed out or failed; continue without memory.",
+        text: formatMemoryResults(result.result),
       };
     },
   });
