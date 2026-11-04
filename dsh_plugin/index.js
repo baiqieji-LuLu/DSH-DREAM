@@ -147,7 +147,7 @@ export const Config = z.object({
     .string()
     .default("")
     .description(
-      "Optional absolute Chroma persistence path. Leave blank to use the backend's per-user DSH default; AGENT_MEMORY_RAG_PATH is the fallback when this field is blank.",
+      "Leave blank to use the DSH user directory; enter an absolute path to customize, or set AGENT_MEMORY_RAG_PATH to override.",
     )
     .volatile(),
 

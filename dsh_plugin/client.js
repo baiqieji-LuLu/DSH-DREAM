@@ -32,9 +32,7 @@ window.__ModuleLoader__.load({
         'Number of RAG memories returned by memory_search (1–20).',
       ragPath: 'Chroma persistence path',
       ragPathHint:
-        "Default: the current user's DSH data directory. Leave blank to use the default, or enter an absolute path to customize.",
-      ragPathPlaceholder:
-        'Leave blank to use the DSH user directory; enter an absolute path to customize.',
+        "Leave blank to use the DSH user directory; enter an absolute path to customize, or set AGENT_MEMORY_RAG_PATH to override.",
       embeddingTitle: 'Embedding model (advanced)',
       embeddingWarning:
         '⚠️ 警告：更换 Embedding 模型会改变向量维度！修改此项后，系统将尝试无损重嵌入旧数据（或要求您手动清空旧 RAG 数据库），否则新记忆将无法与旧记忆一起被检索！',
@@ -91,9 +89,7 @@ window.__ModuleLoader__.load({
       topKHint: 'memory_search 返回的记忆条数（1–20）。',
       ragPath: 'Chroma 持久化路径',
       ragPathHint:
-        '默认存储于当前用户的 DSH 数据目录下，支持通过环境变量 AGENT_MEMORY_RAG_PATH 覆盖。',
-      ragPathPlaceholder:
-        '留空则默认存储在 DSH 用户目录下，如需自定义请输入绝对路径。',
+        '留空则默认存储在 DSH 用户目录下；如需自定义，请填入绝对路径，或通过环境变量 AGENT_MEMORY_RAG_PATH 覆盖。',
       embeddingTitle: 'Embedding 模型（高阶）',
       embeddingWarning:
         '⚠️ 警告：更换 Embedding 模型会改变向量维度！修改此项后，系统将尝试无损重嵌入旧数据（或要求您手动清空旧 RAG 数据库），否则新记忆将无法与旧记忆一起被检索！',
@@ -753,7 +749,7 @@ window.__ModuleLoader__.load({
               className: 'am-input',
               type: 'text',
               value: ragPath,
-              placeholder: tr('ragPathPlaceholder'),
+              placeholder: '',
               onChange: (event) => edit({ ragPath: event.target.value }),
             }),
           ),

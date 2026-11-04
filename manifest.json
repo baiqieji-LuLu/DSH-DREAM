@@ -21,7 +21,7 @@
       "rag_path": {
         "type": "string",
         "title": "Vector database path",
-        "description": "Optional absolute Chroma persistence path. Leave blank to use the backend's per-user DSH default; AGENT_MEMORY_RAG_PATH is the fallback when blank.",
+        "description": "Leave blank to use the DSH user directory; enter an absolute path to customize, or set AGENT_MEMORY_RAG_PATH to override.",
         "default": "",
         "ui:widget": "text"
       },
@@ -120,7 +120,7 @@
       "rag_path": {
         "type": "string",
         "title": "Vector database path",
-        "description": "Optional absolute Chroma persistence path. Leave blank to use the backend's per-user DSH default; AGENT_MEMORY_RAG_PATH is the fallback when blank.",
+        "description": "Leave blank to use the DSH user directory; enter an absolute path to customize, or set AGENT_MEMORY_RAG_PATH to override.",
         "default": "",
         "ui:widget": "text"
       },
