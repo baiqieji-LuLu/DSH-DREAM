@@ -95,3 +95,7 @@ pnpm-debug.log*
 # Private chat archive (never commit)
 .chat_archive_chroma/
 .chat_archive_txt/
+
+# Downloader and local temporary artifacts
+*.part
+*.tmp

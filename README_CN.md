@@ -21,28 +21,13 @@ DSH-DREAM 同时提供 DSH 社区插件和 Python 库。检索默认在本地运
 **首次运行须知：**
 本插件使用本地 RAG 引擎。首次启用时，系统会自动配置轻量级运行环境，并下载约 95MB 的本地向量模型。下载与配置时间取决于网络环境，请等待界面提示完成。后续检索将保持较低延迟。
 
-**Prerequisites:** Python 3.10+ required. Run `pip install -e ".[dev]"` first.
+**环境要求：** 本地开发者需要 Python 3.10+；通过 DSH 插件市场安装时，运行环境由插件自动配置。
 
-### 方式 A：在 DSH 客户端部署（推荐给普通用户）
+### 方式 A：通过 DSH 插件市场安装（推荐）
 
-**1. 下载并解压发布包。**
+直接在 DSH 客户端打开插件市场，搜索 **DSH-DREAM** 并点击安装即可。插件在首次启动时会自动配置轻量级 Python 环境（使用 `uv`）并下载本地 ONNX 模型（约 95MB），请耐心等待界面提示完成。
 
-从项目的 GitHub Releases 页面下载 `release_v0.2.0_prealpha` ZIP（或使用维护者提供的包），在解压目录打开 PowerShell：
-
-```powershell
-Expand-Archive .\DSH-DREAM-v0.2.0-prealpha.zip -DestinationPath .\DSH-DREAM
-cd .\DSH-DREAM
-```
-
-**2. 运行安装脚本。**
-
-```powershell
-powershell -ExecutionPolicy Bypass -File .\install-agent-memory-plugin.ps1 -Force
-```
-
-如果 PowerShell 拦截脚本，请使用上面的命令，不要为了安装永久修改整台机器的执行策略。脚本会把 bundle 注册到 DSH profile，并准备本地桥接配置文件。
-
-**3. 配置模型 Key（只有用 LLM 时才需要）。**
+**1. 配置模型 Key（只有用 LLM 时才需要）。**
 
 本地 Embedding 和检索不需要 API Key。若要让助手用 DeepSeek 生成回复，请在**启动 DSH 之前**设置：
 
@@ -55,14 +40,14 @@ setx DEEPSEEK_API_KEY "sk-your-key-here"
 
 不要把 Key 提交到仓库、写进 README 或放进会被 Git 跟踪的配置文件。
 
-**4. 打开 DSH 设置。**
+**2. 打开 DSH 设置。**
 
 进入 **Settings → DSH-DREAM**（有些 DSH 版本会放在插件/设置区域）。打开：
 
 - **启用长期记忆 / Enable long-term memory**；
 - 如果希望每轮都完整保存，再打开 **全息模式 / Holographic mode (forced full memory)**。
 
-点击 **Save**，然后发送一条测试消息。第一次检索可能需要几秒钟初始化本地 Chroma 集合和 Embedding 模型。
+点击 **Save**，然后发送一条测试消息。第一次检索可能需要几秒钟初始化本地向量数据库和 Embedding 模型。
 
 ### 方式 B：作为 Python 库部署（推荐给开发者）
 
