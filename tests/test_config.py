@@ -9,9 +9,6 @@ from pathlib import Path
 import pytest
 
 from agent_memory.config import (
-    DEFAULT_MAX_WINDOW_TOKENS,
-    DEFAULT_RAG_PATH,
-    DEFAULT_RETRIEVAL_TOP_K,
     ConfigError,
     MemoryConfig,
     load_config,
@@ -27,31 +24,25 @@ def _bridge_path(name: str) -> Path:
     return TEST_TMP_ROOT / f"{name}-{uuid.uuid4().hex}.json"
 
 
-def test_defaults_come_from_manifest(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_missing_rag_path_raises_instead_of_defaulting(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     # Do not depend on the user's live bridge or shell environment.
     monkeypatch.delenv("AGENT_MEMORY_RAG_PATH", raising=False)
-    config = load_config(TEST_TMP_ROOT / f"missing-{uuid.uuid4().hex}.json")
-    assert config.enable_memory is True
-    assert config.rag_path == DEFAULT_RAG_PATH
-    assert config.max_window_tokens == DEFAULT_MAX_WINDOW_TOKENS
-    assert config.retrieval_top_k == DEFAULT_RETRIEVAL_TOP_K
-    assert config.embedding_provider == "local"
-    assert config.embedding_model == ""
-    assert config.embedding_api_key == ""
-    assert config.embedding_base_url == ""
-    assert config.auto_rebuild_collection is True
-    assert config.holographic_mode is False
+    with pytest.raises(ConfigError, match="rag_path is not configured"):
+        load_config(TEST_TMP_ROOT / f"missing-{uuid.uuid4().hex}.json")
 
 
 def test_bridge_file_overrides_defaults(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.delenv("AGENT_MEMORY_RAG_PATH", raising=False)
     bridge = _bridge_path("bridge")
+    custom_memory = (TEST_TMP_ROOT / "custom_memory").resolve()
     try:
         bridge.write_text(
             json.dumps(
                 {
                     "enable_memory": False,
-                    "rag_path": "custom_memory",
+                    "rag_path": str(custom_memory),
                     "max_window_tokens": 2048,
                     "retrieval_top_k": 7,
                 }
@@ -62,7 +53,7 @@ def test_bridge_file_overrides_defaults(monkeypatch: pytest.MonkeyPatch) -> None
         config = load_config(bridge)
 
         assert config.enable_memory is False
-        assert config.rag_path == (PROJECT_ROOT / "custom_memory").resolve()
+        assert config.rag_path == custom_memory
         assert config.max_window_tokens == 2048
         assert config.retrieval_top_k == 7
         assert isinstance(config, MemoryConfig)
@@ -143,6 +134,7 @@ def test_embedding_bridge_values_are_trimmed() -> None:
         bridge.write_text(
             json.dumps(
                 {
+                    "rag_path": str((TEST_TMP_ROOT / "embedding-db").resolve()),
                     "embedding_provider": " openai_compatible ",
                     "embedding_model": " text-embedding-3-small ",
                     "embedding_api_key": " sk-test ",
@@ -178,7 +170,13 @@ def test_numbers_are_clamped() -> None:
     bridge = _bridge_path("clamp")
     try:
         bridge.write_text(
-            json.dumps({"max_window_tokens": 1, "retrieval_top_k": 999}),
+            json.dumps(
+                {
+                    "rag_path": str((TEST_TMP_ROOT / "clamp-db").resolve()),
+                    "max_window_tokens": 1,
+                    "retrieval_top_k": 999,
+                }
+            ),
             encoding="utf-8",
         )
         config = load_config(bridge)

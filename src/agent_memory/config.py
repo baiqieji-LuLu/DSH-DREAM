@@ -15,13 +15,16 @@ The bridge-file resolution order is:
 Within the resolved config, ``rag_path`` priority is:
 
 1. the value entered in the DSH UI / bridge file;
-2. ``AGENT_MEMORY_RAG_PATH``;
-3. the per-user DSH data directory resolved at runtime.
+2. ``AGENT_MEMORY_RAG_PATH``.
+
+There is deliberately no implicit ``.chroma`` fallback: a missing/blank value
+raises :class:`ConfigError` instead of silently opening a stale database.
 
 中文说明：
 DSH 原生设置面板通过 Host 插件的 ``Config`` 表单把配置写入一个 JSON 桥接文件。
 本模块读取该文件并返回校验后的 :class:`MemoryConfig`；``rag_path`` 优先级为：
-UI/桥接文件显式值 → ``AGENT_MEMORY_RAG_PATH`` → 运行时解析的用户 DSH 数据目录。
+UI/桥接文件显式值 → ``AGENT_MEMORY_RAG_PATH``。两者都没有时直接报错，
+不再回退到任何隐式的 ``.chroma`` 数据库。
 Host 使用 ``DSH_DREAM_CONFIG`` 指向当前 profile，避免旧的 ``AGENT_MEMORY_CONFIG`` 劫持。
 """
 
@@ -238,10 +241,10 @@ def load_config(config_path: str | Path | None = None) -> MemoryConfig:
             a JSON object.
 
     中文说明：
-        加载并校验有效配置。桥接文件按显式路径、``AGENT_MEMORY_CONFIG``、
-        项目根目录 ``agent_memory_config.json``、manifest 默认值解析。
-        ``rag_path`` 优先使用 UI/桥接值，其次 ``AGENT_MEMORY_RAG_PATH``，
-        最后使用运行时解析的用户 DSH 数据目录；返回值一定是绝对路径。
+        加载并校验有效配置。桥接文件按显式路径、``DSH_DREAM_CONFIG``、
+        ``AGENT_MEMORY_CONFIG``、项目根目录 ``agent_memory_config.json``、
+        manifest 默认值解析。``rag_path`` 必须由 DSH UI/桥接配置或
+        ``AGENT_MEMORY_RAG_PATH`` 显式提供；不再回退到任何隐式 ``.chroma``。
     """
     merged: dict[str, Any] = {}
     merged.update(_manifest_defaults())
@@ -249,14 +252,19 @@ def load_config(config_path: str | Path | None = None) -> MemoryConfig:
 
     ui_rag = str(merged.get("rag_path") or "").strip()
     env_rag = os.environ.get("AGENT_MEMORY_RAG_PATH", "").strip()
-    default_rag = ui_rag or env_rag
-    if not default_rag or default_rag == ".chroma":
-        rag_path = DEFAULT_RAG_PATH
-    else:
-        rag_path = Path(default_rag).expanduser()
-        if not rag_path.is_absolute():
-            rag_path = PROJECT_ROOT / rag_path
-        rag_path = rag_path.resolve()
+    rag_text = ui_rag or env_rag
+    if not rag_text:
+        raise ConfigError(
+            "rag_path is not configured; set it in the DSH settings panel "
+            "or AGENT_MEMORY_RAG_PATH, then restart DSH."
+        )
+    rag_path = Path(rag_text).expanduser()
+    if not rag_path.is_absolute():
+        raise ConfigError(
+            "rag_path must be an absolute path; refusing implicit fallback "
+            f"to {PROJECT_ROOT / rag_path}."
+        )
+    rag_path = rag_path.resolve()
 
     return MemoryConfig(
         enable_memory=_coerce_bool(merged.get("enable_memory"), True),

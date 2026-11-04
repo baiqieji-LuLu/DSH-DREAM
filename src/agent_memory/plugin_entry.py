@@ -569,7 +569,18 @@ def configure_plugin(
     ``max_window_tokens``，存储路径来自 ``rag_path``，默认召回数来自
     ``retrieval_top_k``。关闭记忆时使用空后端，不会打开 Chroma。
     """
-    effective_config = config if config is not None else load_config()
+    if config is None and all(
+        component is not None
+        for component in (anchor_manager, window_manager, rag_store, audit_logger)
+    ):
+        # Fully injected runtimes (tests/embedders) need no bridge file; there
+        # is no implicit .chroma fallback for the normal DSH path.
+        store_path = getattr(rag_store, "persist_directory", Path.cwd())
+        effective_config = MemoryConfig(
+            rag_path=Path(store_path).expanduser().resolve()
+        )
+    else:
+        effective_config = config if config is not None else load_config()
     effective_enable = (
         effective_config.enable_memory if enable_memory is None else enable_memory
     )
