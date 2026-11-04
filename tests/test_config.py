@@ -99,6 +99,44 @@ def test_environment_is_rag_fallback(monkeypatch: pytest.MonkeyPatch) -> None:
     assert config.rag_path == expected
 
 
+def test_current_host_config_beats_legacy_env(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    current = _bridge_path("current-host")
+    legacy = _bridge_path("legacy-host")
+    current_db = TEST_TMP_ROOT / f"current-db-{uuid.uuid4().hex}"
+    legacy_db = TEST_TMP_ROOT / f"legacy-db-{uuid.uuid4().hex}"
+    try:
+        current.write_text(
+            json.dumps(
+                {
+                    "enable_memory": False,
+                    "rag_path": str(current_db),
+                }
+            ),
+            encoding="utf-8",
+        )
+        legacy.write_text(
+            json.dumps(
+                {
+                    "enable_memory": True,
+                    "rag_path": str(legacy_db),
+                }
+            ),
+            encoding="utf-8",
+        )
+        monkeypatch.setenv("DSH_DREAM_CONFIG", str(current))
+        monkeypatch.setenv("AGENT_MEMORY_CONFIG", str(legacy))
+
+        config = load_config()
+
+        assert config.enable_memory is False
+        assert config.rag_path == current_db.resolve()
+    finally:
+        current.unlink(missing_ok=True)
+        legacy.unlink(missing_ok=True)
+
+
 def test_embedding_bridge_values_are_trimmed() -> None:
     bridge = _bridge_path("embedding")
     try:

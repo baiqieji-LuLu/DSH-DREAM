@@ -7,9 +7,10 @@ and returns a validated :class:`MemoryConfig`.
 The bridge-file resolution order is:
 
 1. explicitly supplied ``config_path``;
-2. ``AGENT_MEMORY_CONFIG``;
-3. ``agent_memory_config.json`` in the project root;
-4. defaults from ``manifest.json``.
+2. ``DSH_DREAM_CONFIG``;
+3. ``AGENT_MEMORY_CONFIG``;
+4. ``agent_memory_config.json`` in the project root;
+5. defaults from ``manifest.json``.
 
 Within the resolved config, ``rag_path`` priority is:
 
@@ -21,6 +22,7 @@ Within the resolved config, ``rag_path`` priority is:
 DSH 原生设置面板通过 Host 插件的 ``Config`` 表单把配置写入一个 JSON 桥接文件。
 本模块读取该文件并返回校验后的 :class:`MemoryConfig`；``rag_path`` 优先级为：
 UI/桥接文件显式值 → ``AGENT_MEMORY_RAG_PATH`` → 运行时解析的用户 DSH 数据目录。
+Host 使用 ``DSH_DREAM_CONFIG`` 指向当前 profile，避免旧的 ``AGENT_MEMORY_CONFIG`` 劫持。
 """
 
 from __future__ import annotations
@@ -54,6 +56,7 @@ def _default_rag_path() -> Path:
 # explicit AGENT_MEMORY_CONFIG still wins for non-default checkouts.
 DEFAULT_CONFIG_PATH: Final[Path] = PROJECT_ROOT / "agent_memory_config.json"
 CONFIG_ENV: Final[str] = "AGENT_MEMORY_CONFIG"
+DSH_CONFIG_ENV: Final[str] = "DSH_DREAM_CONFIG"
 DEFAULT_RAG_PATH: Final[Path] = _default_rag_path()
 DEFAULT_MAX_WINDOW_TOKENS: Final[int] = 1_500
 DEFAULT_RETRIEVAL_TOP_K: Final[int] = 5
@@ -124,9 +127,12 @@ def resolve_config_path(config_path: str | Path | None = None) -> Path:
     """
     if config_path is not None:
         return Path(config_path).expanduser().resolve()
-    env_path = os.getenv(CONFIG_ENV)
-    if env_path:
-        return Path(env_path).expanduser().resolve()
+    # The Host writes DSH_DREAM_CONFIG for the current profile; the legacy
+    # AGENT_MEMORY_CONFIG remains a fallback for direct library use only.
+    for env_name in (DSH_CONFIG_ENV, CONFIG_ENV):
+        env_path = os.getenv(env_name, "").strip()
+        if env_path:
+            return Path(env_path).expanduser().resolve()
     return DEFAULT_CONFIG_PATH
 
 

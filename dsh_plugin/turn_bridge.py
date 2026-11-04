@@ -10,6 +10,7 @@ It intentionally never prints or reads the embedding API key.
 
 from __future__ import annotations
 
+import importlib.util
 import json
 import os
 import re
@@ -23,6 +24,54 @@ def _project_root() -> Path:
 
 
 _PROJECT_ROOT = _project_root()
+
+
+def _python_candidates():
+    explicit = os.environ.get("DSH_DREAM_PYTHON", "").strip()
+    if explicit:
+        yield Path(explicit).expanduser()
+    roots = [
+        _PROJECT_ROOT,
+        Path.cwd(),
+        *Path.cwd().parents[:2],
+    ]
+    for root in dict.fromkeys(roots):
+        candidates = (
+            [root / ".venv" / "Scripts" / "python.exe"]
+            if os.name == "nt"
+            else [root / ".venv" / "bin" / "python"]
+        )
+        yield from candidates
+
+
+def _runtime_available() -> bool:
+    return all(
+        importlib.util.find_spec(name) is not None
+        for name in ("agent_memory", "chromadb", "sentence_transformers")
+    )
+
+
+def _maybe_reexec_with_venv() -> None:
+    """Rescue a global-Python launch by re-execing the adjacent venv."""
+    if os.environ.get("DSH_DREAM_REEXEC") == "1" or _runtime_available():
+        return
+    current = Path(sys.executable).resolve()
+    for candidate in _python_candidates():
+        try:
+            resolved = candidate.resolve()
+        except OSError:
+            continue
+        if resolved == current or not resolved.is_file():
+            continue
+        os.environ["DSH_DREAM_REEXEC"] = "1"
+        os.environ.setdefault("PYTHONUNBUFFERED", "1")
+        os.execv(str(resolved), [str(resolved), "-u", str(Path(__file__).resolve())])
+    # No usable venv found: let the original import surface the real error.
+
+
+_maybe_reexec_with_venv()
+
+
 # Prefer the project-local cache when present; otherwise leave the host's
 # HF_HOME untouched so npm-installed plugins can use a global model cache.
 _LOCAL_HF_CACHE = _PROJECT_ROOT / ".hf-cache"

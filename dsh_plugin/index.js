@@ -43,12 +43,33 @@ const TURN_BRIDGE = resolve(PLUGIN_DIR, "turn_bridge.py");
 const PROJECT_ROOT = resolve(process.env.DSH_DREAM_ROOT || resolve(PLUGIN_DIR, ".."));
 
 /**
- * Prefer an explicitly configured interpreter, then the platform command on
- * PATH. Do not hard-code a virtualenv path: users install into different roots.
+ * Resolve the interpreter without hard-coding a machine-specific path:
+ * explicit env override -> adjacent project/working-directory venv -> PATH.
  */
-const PYTHON =
-  process.env.DSH_DREAM_PYTHON ||
-  (process.platform === "win32" ? "python" : "python3");
+function resolvePython() {
+  const explicit = String(process.env.DSH_DREAM_PYTHON || "").trim();
+  if (explicit) return explicit;
+
+  const roots = [
+    process.env.DSH_DREAM_ROOT,
+    PROJECT_ROOT,
+    process.cwd(),
+  ].filter(Boolean);
+  const venvPaths =
+    process.platform === "win32"
+      ? [".venv\\Scripts\\python.exe"]
+      : [".venv/bin/python"];
+
+  for (const root of new Set(roots)) {
+    for (const relative of venvPaths) {
+      const candidate = resolve(root, relative);
+      if (existsSync(candidate)) return candidate;
+    }
+  }
+  return process.platform === "win32" ? "python" : "python3";
+}
+
+const PYTHON = resolvePython();
 
 /** Local activation log, useful when DSH's own runtime log is unavailable. */
 const DIAG_PATH = resolve(
@@ -118,11 +139,12 @@ export const CONFIG_BRIDGE_PATH = resolve(
 );
 
 /**
- * Target bridge path. The default is the fixed absolute path above; an
- * explicit `AGENT_MEMORY_CONFIG` may override it for a non-default checkout.
+ * Target bridge path. Prefer the Host-specific override; deliberately ignore
+ * the legacy global AGENT_MEMORY_CONFIG so a stale checkout cannot hijack the
+ * current profile's config.
  */
 const bridgePath = () =>
-  resolve(process.env.AGENT_MEMORY_CONFIG || CONFIG_BRIDGE_PATH);
+  resolve(process.env.DSH_DREAM_CONFIG || CONFIG_BRIDGE_PATH);
 
 /** Read the existing bridge file, or return null when it is absent/invalid. */
 function readBridgeFile(target) {
@@ -345,7 +367,11 @@ export function apply(ctx, config) {
       try {
         turnBridge = spawn(PYTHON, ["-u", TURN_BRIDGE], {
           cwd: PROJECT_ROOT,
-          env: { ...process.env, AGENT_MEMORY_CONFIG: target },
+          env: {
+            ...process.env,
+            AGENT_MEMORY_CONFIG: target,
+            DSH_DREAM_CONFIG: target,
+          },
           stdio: ["pipe", "pipe", "pipe"],
           windowsHide: true,
         });
