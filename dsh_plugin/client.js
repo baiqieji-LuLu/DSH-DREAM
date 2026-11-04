@@ -43,7 +43,8 @@ window.__ModuleLoader__.load({
       hfHomePlaceholder: 'Auto-detect a writable cache',
       runtimeCheck: 'Runtime check',
       runtimeChecking: 'Checking Python runtime…',
-      runtimeProvisioning: 'Provisioning Python dependencies for first run…',
+      runtimeProvisioning:
+        'Initializing the memory engine (first run may take a few minutes)…',
       runtimeInstalled: 'Dependencies are installed. Restart DSH to continue.',
       runtimeOk: 'Python runtime is ready.',
       runtimeMissing: 'Missing Python packages:',
@@ -117,7 +118,7 @@ window.__ModuleLoader__.load({
       hfHomePlaceholder: '自动寻找可写缓存目录',
       runtimeCheck: '运行环境检查',
       runtimeChecking: '正在检查 Python 运行环境…',
-      runtimeProvisioning: '正在为首次运行装配依赖...',
+      runtimeProvisioning: '正在初始化记忆引擎（首次运行可能需要几分钟）…',
       runtimeInstalled: '依赖装配完成，请重启 DSH。',
       runtimeOk: 'Python 运行环境正常。',
       runtimeMissing: '缺少 Python 依赖：',
