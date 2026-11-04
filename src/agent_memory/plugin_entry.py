@@ -16,6 +16,7 @@ the module-level functions convenient without hiding global state from tests.
 from __future__ import annotations
 
 import copy
+import re
 import threading
 from pathlib import Path
 from typing import Any, Final, Protocol
@@ -32,6 +33,10 @@ from .renderer import build_prompt
 from .window_manager import WindowManager
 
 DEFAULT_RAG_TOP_K: Final[int] = 5
+_INJECTED_DIALOGUE = re.compile(
+    r"^\s*<(?:system-reminder|available_skills|skill_content|memory-hint)\b",
+    re.IGNORECASE,
+)
 SOURCE_TYPE_VALUES: Final[tuple[str, ...]] = (
     "user_message",
     "system_fact",
@@ -427,6 +432,14 @@ class MemoryPlugin:
         """
         user_text = _required_text(user_msg, "user_msg")
         ai_text = _required_text(ai_msg, "ai_msg")
+        if _INJECTED_DIALOGUE.search(user_text) or _INJECTED_DIALOGUE.search(
+            ai_text
+        ):
+            return {
+                "ok": False,
+                "enabled": True,
+                "error": "system-injected turn rejected",
+            }
         fact_text: str | None = None
         if extracted_fact is not None:
             if not isinstance(extracted_fact, str):
