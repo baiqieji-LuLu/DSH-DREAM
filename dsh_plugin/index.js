@@ -6,9 +6,9 @@
  * resolved values are also written to the Python bridge file next to the
  * installed plugin root.
  *
- * `rag_path` is disabled (read-only) in the panel and is intentionally empty:
- * the Host never sends the resolved user path to the browser. Set
- * `AGENT_MEMORY_RAG_PATH` before starting DSH to override the backend default.
+ * `rag_path` is an optional UI override. It is empty by default: the backend
+ * resolves the per-user DSH path and never sends that default to the browser.
+ * `AGENT_MEMORY_RAG_PATH` is the fallback when the field is blank.
  */
 import { spawn } from "node:child_process";
 import {
@@ -147,9 +147,8 @@ export const Config = z.object({
     .string()
     .default("")
     .description(
-      "Read-only. The backend stores data in the current user's DSH data directory; set AGENT_MEMORY_RAG_PATH before starting DSH to override.",
+      "Optional absolute Chroma persistence path. Leave blank to use the backend's per-user DSH default; AGENT_MEMORY_RAG_PATH is the fallback when this field is blank.",
     )
-    .disabled()
     .volatile(),
 
   max_window_tokens: z
@@ -235,9 +234,10 @@ function normalizePayload(raw) {
     .toLowerCase();
   return {
     enable_memory: Boolean(current(value.enable_memory) ?? true),
-    // Never expose a resolved host path to the browser; the backend resolves
-    // the per-user DSH data directory (and honors AGENT_MEMORY_RAG_PATH).
-    rag_path: "",
+    // Preserve an explicit UI override, but never synthesize a default path:
+    // the backend resolves the per-user DSH data directory (and honors
+    // AGENT_MEMORY_RAG_PATH) when this field is blank.
+    rag_path: String(current(value.rag_path) ?? "").trim(),
     max_window_tokens: Number(current(value.max_window_tokens) ?? 1500),
     retrieval_top_k: Number(current(value.retrieval_top_k) ?? 5),
     embedding_provider:

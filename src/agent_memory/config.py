@@ -4,18 +4,23 @@ The DSH Host settings panel writes a small JSON bridge file from the native
 ``Config`` form. This module reads that file (or a compatible manifest default)
 and returns a validated :class:`MemoryConfig`.
 
-The resolution order is:
+The bridge-file resolution order is:
 
 1. explicitly supplied ``config_path``;
 2. ``AGENT_MEMORY_CONFIG``;
 3. ``agent_memory_config.json`` in the project root;
 4. defaults from ``manifest.json``.
 
+Within the resolved config, ``rag_path`` priority is:
+
+1. the value entered in the DSH UI / bridge file;
+2. ``AGENT_MEMORY_RAG_PATH``;
+3. the per-user DSH data directory resolved at runtime.
+
 中文说明：
 DSH 原生设置面板通过 Host 插件的 ``Config`` 表单把配置写入一个 JSON 桥接文件。
-本模块读取该文件并返回校验后的 :class:`MemoryConfig`；如果没有桥接文件，则回退到
-项目根目录 ``manifest.json`` 的默认值。配置优先级为：显式路径 → 环境变量
-``AGENT_MEMORY_CONFIG`` → 项目根目录 ``agent_memory_config.json`` → manifest 默认值。
+本模块读取该文件并返回校验后的 :class:`MemoryConfig`；``rag_path`` 优先级为：
+UI/桥接文件显式值 → ``AGENT_MEMORY_RAG_PATH`` → 运行时解析的用户 DSH 数据目录。
 """
 
 from __future__ import annotations
@@ -227,16 +232,18 @@ def load_config(config_path: str | Path | None = None) -> MemoryConfig:
             a JSON object.
 
     中文说明：
-        加载并校验有效配置。优先使用显式路径，其次 ``AGENT_MEMORY_CONFIG``，
-        然后项目根目录 ``agent_memory_config.json``，最后回退 manifest 默认值。
-        返回值中的 ``rag_path`` 一定是绝对路径。
+        加载并校验有效配置。桥接文件按显式路径、``AGENT_MEMORY_CONFIG``、
+        项目根目录 ``agent_memory_config.json``、manifest 默认值解析。
+        ``rag_path`` 优先使用 UI/桥接值，其次 ``AGENT_MEMORY_RAG_PATH``，
+        最后使用运行时解析的用户 DSH 数据目录；返回值一定是绝对路径。
     """
     merged: dict[str, Any] = {}
     merged.update(_manifest_defaults())
     merged.update(_read_config_file(resolve_config_path(config_path)))
 
+    ui_rag = str(merged.get("rag_path") or "").strip()
     env_rag = os.environ.get("AGENT_MEMORY_RAG_PATH", "").strip()
-    default_rag = env_rag or str(merged.get("rag_path") or "").strip()
+    default_rag = ui_rag or env_rag
     if not default_rag or default_rag == ".chroma":
         rag_path = DEFAULT_RAG_PATH
     else:

@@ -71,6 +71,34 @@ def test_bridge_file_overrides_defaults(monkeypatch: pytest.MonkeyPatch) -> None
         bridge.unlink(missing_ok=True)
 
 
+def test_ui_rag_path_beats_environment(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv(
+        "AGENT_MEMORY_RAG_PATH",
+        str((PROJECT_ROOT / "from_env").resolve()),
+    )
+    bridge = _bridge_path("ui-rag")
+    try:
+        bridge.write_text(
+            json.dumps({"rag_path": str((PROJECT_ROOT / "from_ui").resolve())}),
+            encoding="utf-8",
+        )
+
+        config = load_config(bridge)
+
+        assert config.rag_path == (PROJECT_ROOT / "from_ui").resolve()
+    finally:
+        bridge.unlink(missing_ok=True)
+
+
+def test_environment_is_rag_fallback(monkeypatch: pytest.MonkeyPatch) -> None:
+    expected = (PROJECT_ROOT / "from_env_fallback").resolve()
+    monkeypatch.setenv("AGENT_MEMORY_RAG_PATH", str(expected))
+
+    config = load_config(TEST_TMP_ROOT / f"missing-{uuid.uuid4().hex}.json")
+
+    assert config.rag_path == expected
+
+
 def test_embedding_bridge_values_are_trimmed() -> None:
     bridge = _bridge_path("embedding")
     try:

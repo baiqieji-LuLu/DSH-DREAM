@@ -32,7 +32,9 @@ window.__ModuleLoader__.load({
         'Number of RAG memories returned by memory_search (1–20).',
       ragPath: 'Chroma persistence path',
       ragPathHint:
-        "Default: the current user's DSH data directory. To change it, set AGENT_MEMORY_RAG_PATH and restart DSH.",
+        "Default: the current user's DSH data directory. Leave blank to use the default, or enter an absolute path to customize.",
+      ragPathPlaceholder:
+        'Leave blank to use the DSH user directory; enter an absolute path to customize.',
       embeddingTitle: 'Embedding model (advanced)',
       embeddingWarning:
         '⚠️ 警告：更换 Embedding 模型会改变向量维度！修改此项后，系统将尝试无损重嵌入旧数据（或要求您手动清空旧 RAG 数据库），否则新记忆将无法与旧记忆一起被检索！',
@@ -88,7 +90,10 @@ window.__ModuleLoader__.load({
       topK: 'RAG 召回数量',
       topKHint: 'memory_search 返回的记忆条数（1–20）。',
       ragPath: 'Chroma 持久化路径',
-      ragPathHint: '默认存储于当前用户的 DSH 数据目录下。如需更改，请设置环境变量 AGENT_MEMORY_RAG_PATH 后重启 DSH。',
+      ragPathHint:
+        '默认存储于当前用户的 DSH 数据目录下，支持通过环境变量 AGENT_MEMORY_RAG_PATH 覆盖。',
+      ragPathPlaceholder:
+        '留空则默认存储在 DSH 用户目录下，如需自定义请输入绝对路径。',
       embeddingTitle: 'Embedding 模型（高阶）',
       embeddingWarning:
         '⚠️ 警告：更换 Embedding 模型会改变向量维度！修改此项后，系统将尝试无损重嵌入旧数据（或要求您手动清空旧 RAG 数据库），否则新记忆将无法与旧记忆一起被检索！',
@@ -356,6 +361,7 @@ window.__ModuleLoader__.load({
       const current = value && typeof value === 'object' ? value : {};
       return {
         enable: current.enable_memory !== false,
+        ragPath: String(current.rag_path ?? ''),
         max: String(current.max_window_tokens ?? 1500),
         top: String(current.retrieval_top_k ?? 5),
         embeddingProvider:
@@ -482,9 +488,7 @@ window.__ModuleLoader__.load({
 
       const writable = snapshot.writable !== false;
       const disabled = !writable || saving;
-      // The Host never sends the resolved absolute path. Keep the read-only
-      // field empty and explain the default in its placeholder/hint.
-      const ragPath = '';
+      const ragPath = String(draft.ragPath || '');
 
       const pushBridge = async (payload) => {
         console.log('🔥 [Client] 推送配置到 Host', {
@@ -538,7 +542,7 @@ window.__ModuleLoader__.load({
         setError('');
         const bridgePayload = {
           enable_memory: draft.enable,
-          rag_path: ragPath,
+          rag_path: String(draft.ragPath || '').trim(),
           max_window_tokens: parsed.max,
           retrieval_top_k: parsed.top,
           embedding_provider: parsed.provider,
@@ -746,12 +750,11 @@ window.__ModuleLoader__.load({
             ),
             h('input', {
               id: 'am-rag-path',
-              className: 'am-input am-input-readonly',
+              className: 'am-input',
               type: 'text',
               value: ragPath,
-              placeholder: tr('ragPathHint'),
-              readOnly: true,
-              'aria-readonly': 'true',
+              placeholder: tr('ragPathPlaceholder'),
+              onChange: (event) => edit({ ragPath: event.target.value }),
             }),
           ),
         ),
