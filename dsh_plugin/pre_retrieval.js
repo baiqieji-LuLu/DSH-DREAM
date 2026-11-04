@@ -135,9 +135,14 @@ export function registerPreRetrieval(
       return decision;
     }
     holoLog(`Pre-retrieval success: injected ${hits.length} memories`);
+    // DSH's user/message event must carry role="user" (system-role messages
+    // are rejected by the session schema). Keep the user role, but use a
+    // non-user source kind: Chat projects non-"user" sources as `context`
+    // nodes and excludes ordinary context from the transcript. This keeps the
+    // hint model-visible without rendering it as a user bubble.
     const context = createUserMessage({
       content: [{ type: "text", text: hint }],
-      source: { kind: "user" },
+      source: { kind: "memory-recall" },
     });
     return {
       ...decision,
