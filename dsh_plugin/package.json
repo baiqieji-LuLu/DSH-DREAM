@@ -1,6 +1,7 @@
 {
   "name": "@local/dsh-dream-settings",
   "version": "0.2.1",
+  "displayName": "DSH-DREAM 长期记忆",
   "private": true,
   "type": "module",
   "main": "./index.js",

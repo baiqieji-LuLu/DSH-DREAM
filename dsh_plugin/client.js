@@ -17,8 +17,8 @@ window.__ModuleLoader__.load({
     const inject = ['slots', 'locale', 'configForms'];
 
     const en = {
-      nav: 'DSH-DREAM',
-      title: 'DSH-DREAM',
+      nav: 'DSH-DREAM Long-Term Memory',
+      title: 'DSH-DREAM Long-Term Memory',
       description:
         'Configure persistent long-term memory for the DSH-DREAM Python package.',
       enable: 'Enable long-term memory',
@@ -80,7 +80,7 @@ window.__ModuleLoader__.load({
     };
 
     const zh = {
-      nav: 'DSH-DREAM',
+      nav: 'DSH-DREAM 长期记忆',
       title: 'DSH-DREAM 长期记忆',
       description: '配置 DSH-DREAM Python 包的持久化长期记忆。',
       enable: '启用长期记忆',

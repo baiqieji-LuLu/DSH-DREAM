@@ -1,6 +1,8 @@
 - insert:
     - id: dsh-dream-settings
       name: '@local/dsh-dream-settings'
+      meta:
+        title: DSH-DREAM 长期记忆
       config:
         enable_memory: true
         max_window_tokens: 1500
