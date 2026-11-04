@@ -29,11 +29,27 @@ from typing import Any, Final
 
 PROJECT_ROOT: Final[Path] = Path(__file__).resolve().parents[2]
 MANIFEST_PATH: Final[Path] = PROJECT_ROOT / "manifest.json"
+
+
+def _default_rag_path() -> Path:
+    """Return a per-user DSH data path, never a checkout/package path."""
+    profile = os.environ.get("DSH_PROFILE_DIR", "").strip()
+    if profile:
+        return (Path(profile).expanduser() / ".chroma").resolve()
+    dsh_home = os.environ.get("DSH_HOME", "").strip()
+    home = (
+        Path(dsh_home).expanduser()
+        if dsh_home
+        else (Path.home() / ".dsh")
+    )
+    return (home / "profiles" / "desktop" / ".chroma").resolve()
+
+
 # The DSH Host plugin writes this exact project-root path by default; an
 # explicit AGENT_MEMORY_CONFIG still wins for non-default checkouts.
 DEFAULT_CONFIG_PATH: Final[Path] = PROJECT_ROOT / "agent_memory_config.json"
 CONFIG_ENV: Final[str] = "AGENT_MEMORY_CONFIG"
-DEFAULT_RAG_PATH: Final[Path] = PROJECT_ROOT / ".chroma"
+DEFAULT_RAG_PATH: Final[Path] = _default_rag_path()
 DEFAULT_MAX_WINDOW_TOKENS: Final[int] = 1_500
 DEFAULT_RETRIEVAL_TOP_K: Final[int] = 5
 MAX_WINDOW_TOKENS: Final[int] = 32_768
@@ -219,12 +235,15 @@ def load_config(config_path: str | Path | None = None) -> MemoryConfig:
     merged.update(_manifest_defaults())
     merged.update(_read_config_file(resolve_config_path(config_path)))
 
-    default_rag = merged.get("rag_path") or str(DEFAULT_RAG_PATH)
-    rag_text = str(default_rag).strip() or str(DEFAULT_RAG_PATH)
-    rag_path = Path(rag_text).expanduser()
-    if not rag_path.is_absolute():
-        rag_path = PROJECT_ROOT / rag_path
-    rag_path = rag_path.resolve()
+    env_rag = os.environ.get("AGENT_MEMORY_RAG_PATH", "").strip()
+    default_rag = env_rag or str(merged.get("rag_path") or "").strip()
+    if not default_rag or default_rag == ".chroma":
+        rag_path = DEFAULT_RAG_PATH
+    else:
+        rag_path = Path(default_rag).expanduser()
+        if not rag_path.is_absolute():
+            rag_path = PROJECT_ROOT / rag_path
+        rag_path = rag_path.resolve()
 
     return MemoryConfig(
         enable_memory=_coerce_bool(merged.get("enable_memory"), True),

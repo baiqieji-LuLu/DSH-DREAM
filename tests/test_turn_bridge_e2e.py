@@ -38,6 +38,7 @@ def test_turn_bridge_writes_one_timestamped_turn() -> None:
         encoding="utf-8",
     )
     env = os.environ.copy()
+    env.pop("AGENT_MEMORY_RAG_PATH", None)
     env["AGENT_MEMORY_CONFIG"] = str(config_path)
     env["HF_HOME"] = str(ROOT / ".hf-cache")
     env["HF_HUB_CACHE"] = str(ROOT / ".hf-cache" / "hub")

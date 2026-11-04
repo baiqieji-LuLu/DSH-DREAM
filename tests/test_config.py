@@ -10,6 +10,7 @@ import pytest
 
 from agent_memory.config import (
     DEFAULT_MAX_WINDOW_TOKENS,
+    DEFAULT_RAG_PATH,
     DEFAULT_RETRIEVAL_TOP_K,
     ConfigError,
     MemoryConfig,
@@ -26,11 +27,12 @@ def _bridge_path(name: str) -> Path:
     return TEST_TMP_ROOT / f"{name}-{uuid.uuid4().hex}.json"
 
 
-def test_defaults_come_from_manifest() -> None:
-    # Do not depend on the user's live agent_memory_config.json bridge.
+def test_defaults_come_from_manifest(monkeypatch: pytest.MonkeyPatch) -> None:
+    # Do not depend on the user's live bridge or shell environment.
+    monkeypatch.delenv("AGENT_MEMORY_RAG_PATH", raising=False)
     config = load_config(TEST_TMP_ROOT / f"missing-{uuid.uuid4().hex}.json")
     assert config.enable_memory is True
-    assert config.rag_path == (PROJECT_ROOT / ".chroma").resolve()
+    assert config.rag_path == DEFAULT_RAG_PATH
     assert config.max_window_tokens == DEFAULT_MAX_WINDOW_TOKENS
     assert config.retrieval_top_k == DEFAULT_RETRIEVAL_TOP_K
     assert config.embedding_provider == "local"
@@ -41,7 +43,8 @@ def test_defaults_come_from_manifest() -> None:
     assert config.holographic_mode is False
 
 
-def test_bridge_file_overrides_defaults() -> None:
+def test_bridge_file_overrides_defaults(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.delenv("AGENT_MEMORY_RAG_PATH", raising=False)
     bridge = _bridge_path("bridge")
     try:
         bridge.write_text(
