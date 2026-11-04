@@ -84,7 +84,7 @@ $profilePatch = Join-Path $profileDir 'cordis.patch.yml'
 $dshCmd = Join-Path $DshRoot 'resources\runtime\cli\bin\dsh.cmd'
 $dshExe = Join-Path $DshRoot 'DeepSeek Harness.exe'
 $configPath = Join-Path $ProjectRoot 'agent_memory_config.json'
-$ragPath = Join-Path $ProjectRoot '.chroma'
+$ragPath = Join-Path $env:USERPROFILE ".dsh\profiles\$Profile\.chroma"
 $bundleName = '@local/dsh-dream-settings'
 
 function Write-Step([string]$Message) {
@@ -226,11 +226,8 @@ Write-Step 'Setting bridge environment variables'
 New-Item -ItemType Directory -Force -Path $ProjectRoot | Out-Null
 New-Item -ItemType Directory -Force -Path (Split-Path -Parent $configPath) | Out-Null
 [Environment]::SetEnvironmentVariable('AGENT_MEMORY_CONFIG', $configPath, 'User')
-[Environment]::SetEnvironmentVariable('AGENT_MEMORY_RAG_PATH', $ragPath, 'User')
 $env:AGENT_MEMORY_CONFIG = $configPath
-$env:AGENT_MEMORY_RAG_PATH = $ragPath
 Write-Ok "AGENT_MEMORY_CONFIG=$configPath"
-Write-Ok "AGENT_MEMORY_RAG_PATH=$ragPath"
 
 if (-not (Test-Path -LiteralPath $configPath)) {
     $seed = [ordered]@{

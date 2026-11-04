@@ -114,8 +114,18 @@ export const CONFIG_BRIDGE_PATH = resolve(
   "agent_memory_config.json",
 );
 
+// User-scoped DSH data directory. Never fall back to the plugin/install
+// directory or an author checkout: a marketplace install must stay portable.
+const DSH_HOME = resolve(
+  process.env.DSH_HOME ||
+    resolve(process.env.USERPROFILE || process.env.HOME || ".", ".dsh"),
+);
+const PROFILE_DIR = resolve(
+  process.env.DSH_PROFILE_DIR || resolve(DSH_HOME, "profiles", "desktop"),
+);
+
 const DEFAULT_RAG_PATH = resolve(
-  process.env.AGENT_MEMORY_RAG_PATH || resolve(PROJECT_ROOT, ".chroma"),
+  process.env.AGENT_MEMORY_RAG_PATH || resolve(PROFILE_DIR, ".chroma"),
 );
 
 /**
@@ -151,7 +161,7 @@ export const Config = z.object({
     .string()
     .default(DEFAULT_RAG_PATH)
     .description(
-      "Absolute Chroma persistence path. Read-only; set AGENT_MEMORY_RAG_PATH before starting DSH to change it.",
+      "Absolute Chroma persistence path. Defaults to the current user's DSH data directory; set AGENT_MEMORY_RAG_PATH before starting DSH to override.",
     )
     .disabled()
     .volatile(),
