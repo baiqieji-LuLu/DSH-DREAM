@@ -72,29 +72,50 @@ def _maybe_reexec_with_venv() -> None:
 _maybe_reexec_with_venv()
 
 
-# Use a writable per-user cache. A marketplace install lives under the
-# read-only profile node_modules tree, so never assume a plugin-local cache.
-def _cache_root() -> Path:
+# Use a writable cache. A marketplace install lives under the read-only
+# profile node_modules tree, so try user, plugin, then cwd cache locations.
+def _cache_candidates():
     configured = os.environ.get("DSH_DREAM_HF_CACHE", "").strip()
     if not configured:
         configured = os.environ.get("HF_HOME", "").strip()
     if configured:
-        return Path(configured).expanduser()
+        yield Path(configured).expanduser()
     dsh_home = os.environ.get("DSH_HOME", "").strip()
     home = Path(dsh_home).expanduser() if dsh_home else (Path.home() / ".dsh")
-    return home / "profiles" / "desktop" / ".hf-cache"
+    yield home / "profiles" / "desktop" / ".hf-cache"
+    yield _PROJECT_ROOT / ".hf-cache"
+    yield Path.cwd() / ".hf-cache"
 
 
-_HF_CACHE = _cache_root()
-try:
-    _HF_CACHE.mkdir(parents=True, exist_ok=True)
-except OSError:
-    pass
-os.environ["HF_HOME"] = str(_HF_CACHE)
-os.environ["HF_HUB_CACHE"] = str(_HF_CACHE / "hub")
+def _writable_cache(path: Path) -> Path | None:
+    try:
+        path.mkdir(parents=True, exist_ok=True)
+        probe = path / f".dsh-dream-write-probe-{os.getpid()}"
+        probe.write_text("ok", encoding="utf-8")
+        probe.unlink(missing_ok=True)
+        return path
+    except (OSError, PermissionError):
+        return None
+
+
+_HF_CACHE: Path | None = None
+_CACHE_ERROR = ""
+for _candidate in _cache_candidates():
+    _HF_CACHE = _writable_cache(_candidate)
+    if _HF_CACHE is not None:
+        break
+if _HF_CACHE is None:
+    _CACHE_ERROR = "模型缓存目录不可写，请手动在设置中指定目录"
+else:
+    os.environ["HF_HOME"] = str(_HF_CACHE)
+    os.environ["HF_HUB_CACHE"] = str(_HF_CACHE / "hub")
 os.environ["HF_HUB_OFFLINE"] = "0"
 os.environ["TRANSFORMERS_OFFLINE"] = "0"
 os.environ["HF_HUB_DISABLE_SYMLINKS"] = "1"
+
+
+def _cache_label() -> str:
+    return str(_HF_CACHE) if _HF_CACHE is not None else ""
 
 _PLUGIN_IMPORT_ERROR: str | None = None
 try:
@@ -159,7 +180,8 @@ def main() -> int:
                         "error": "Python environment is missing required DSH-DREAM packages.",
                         "detail": _PLUGIN_IMPORT_ERROR,
                         "python": sys.executable,
-                        "hf_home": str(_HF_CACHE),
+                        "hf_home": _cache_label(),
+                        "cache_error": _CACHE_ERROR,
                         "hint": "Set DSH_DREAM_PYTHON to a Python with chromadb and sentence-transformers installed, or run pip install -e \".[dev]\" in the DSH-DREAM checkout.",
                     },
                     ensure_ascii=False,
@@ -177,6 +199,23 @@ def main() -> int:
             if not isinstance(payload, dict):
                 raise ValueError("turn payload must be an object")
             request_id = payload.get("request_id")
+            if payload.get("op") == "warmup":
+                get_plugin()
+                print(
+                    json.dumps(
+                        {
+                            "request_id": request_id,
+                            "ok": True,
+                            "warmup": True,
+                            "python": sys.executable,
+                            "hf_home": _cache_label(),
+                            "cache_error": _CACHE_ERROR,
+                        },
+                        ensure_ascii=False,
+                    ),
+                    flush=True,
+                )
+                continue
             if payload.get("op") == "query":
                 query = str(payload.get("query") or "").strip()
                 if not query:

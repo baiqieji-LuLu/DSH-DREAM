@@ -32,6 +32,13 @@
         "default": "",
         "ui:widget": "text"
       },
+      "hf_home_path": {
+        "type": "string",
+        "title": "Model cache directory",
+        "description": "Optional writable directory for Hugging Face models; leave blank to try the DSH profile, plugin, and working-directory .hf-cache locations.",
+        "default": "",
+        "ui:widget": "text"
+      },
       "max_window_tokens": {
         "type": "integer",
         "title": "Window token budget",
@@ -108,6 +115,7 @@
       "enable_memory",
       "rag_path",
       "python_path",
+      "hf_home_path",
       "max_window_tokens",
       "retrieval_top_k",
       "embedding_provider",
@@ -136,6 +144,13 @@
         "type": "string",
         "title": "Python interpreter path",
         "description": "Optional absolute path to a Python with chromadb and sentence-transformers; leave blank to auto-detect an adjacent .venv or PATH.",
+        "default": "",
+        "ui:widget": "text"
+      },
+      "hf_home_path": {
+        "type": "string",
+        "title": "Model cache directory",
+        "description": "Optional writable directory for Hugging Face models; leave blank to try the DSH profile, plugin, and working-directory .hf-cache locations.",
         "default": "",
         "ui:widget": "text"
       },

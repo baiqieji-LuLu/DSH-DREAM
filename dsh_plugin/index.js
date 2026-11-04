@@ -19,6 +19,7 @@ import {
   existsSync,
   mkdirSync,
   readFileSync,
+  unlinkSync,
   writeFileSync,
 } from "node:fs";
 import { createRequire } from "node:module";
@@ -56,9 +57,45 @@ const DSH_HOME = resolve(
 const PROFILE_DIR = resolve(
   process.env.DSH_PROFILE_DIR || resolve(DSH_HOME, "profiles", "desktop"),
 );
-const HF_HOME = resolve(
-  process.env.DSH_DREAM_HF_CACHE || resolve(PROFILE_DIR, ".hf-cache"),
-);
+/** Verify a cache directory is actually writable before using it. */
+function writableCacheDir(directory) {
+  try {
+    mkdirSync(directory, { recursive: true });
+    const probe = resolve(
+      directory,
+      `.dsh-dream-write-probe-${process.pid}-${Date.now()}`,
+    );
+    writeFileSync(probe, "ok", "utf8");
+    unlinkSync(probe);
+    return directory;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Resolve HF_HOME in priority order, failing over when a profile directory is
+ * sandboxed/read-only. Returns null when every candidate is unwritable.
+ */
+function resolveCache(configured = "") {
+  const candidates = [
+    process.env.DSH_DREAM_HF_CACHE,
+    configured,
+    resolve(PROFILE_DIR, ".hf-cache"),
+    resolve(PROJECT_ROOT, ".hf-cache"),
+    resolve(process.cwd(), ".hf-cache"),
+  ];
+  for (const candidate of candidates) {
+    const text = String(candidate || "").trim();
+    if (!text) continue;
+    const writable = writableCacheDir(resolve(text));
+    if (writable) return { path: writable, error: "" };
+  }
+  return {
+    path: null,
+    error: "模型缓存目录不可写，请手动在设置中指定目录",
+  };
+}
 
 /**
  * Resolve the interpreter without hard-coding a machine-specific path:
@@ -204,6 +241,14 @@ export const Config = z.object({
     )
     .volatile(),
 
+  hf_home_path: z
+    .string()
+    .default("")
+    .description(
+      "Optional writable model cache directory. Leave blank to try the DSH profile, plugin, and working-directory .hf-cache locations.",
+    )
+    .volatile(),
+
   max_window_tokens: z
     .natural()
     .min(128)
@@ -292,6 +337,7 @@ function normalizePayload(raw) {
     // AGENT_MEMORY_RAG_PATH) when this field is blank.
     rag_path: String(current(value.rag_path) ?? "").trim(),
     python_path: String(current(value.python_path) ?? "").trim(),
+    hf_home_path: String(current(value.hf_home_path) ?? "").trim(),
     max_window_tokens: Number(current(value.max_window_tokens) ?? 1500),
     retrieval_top_k: Number(current(value.retrieval_top_k) ?? 5),
     embedding_provider:
@@ -390,12 +436,19 @@ export function apply(ctx, config) {
     const pendingQueries = new Map();
     let turnBridge = null;
     let turnBridgeBuffer = "";
+    let bridgeColdStart = true;
 
     const ensureTurnBridge = () => {
       if (turnBridge && !turnBridge.killed) return turnBridge;
       try {
         const bridgeConfig = readBridgeFile(target);
         const python = resolvePython(bridgeConfig?.python_path);
+        const cache = resolveCache(bridgeConfig?.hf_home_path);
+        if (!cache.path) {
+          diag(`model cache unavailable: ${cache.error}`);
+          return null;
+        }
+        bridgeColdStart = true;
         turnBridge = spawn(python, ["-u", TURN_BRIDGE], {
           cwd: PROJECT_ROOT,
           env: {
@@ -403,9 +456,9 @@ export function apply(ctx, config) {
             AGENT_MEMORY_CONFIG: target,
             DSH_DREAM_CONFIG: target,
             DSH_DREAM_PYTHON: python,
-            DSH_DREAM_HF_CACHE: HF_HOME,
-            HF_HOME,
-            HF_HUB_CACHE: resolve(HF_HOME, "hub"),
+            DSH_DREAM_HF_CACHE: cache.path,
+            HF_HOME: cache.path,
+            HF_HUB_CACHE: resolve(cache.path, "hub"),
             HF_HUB_OFFLINE: "0",
             TRANSFORMERS_OFFLINE: "0",
           },
@@ -448,6 +501,15 @@ export function apply(ctx, config) {
           diag(`holographic bridge exited code=${code} signal=${signal}`);
           turnBridge = null;
         });
+        // Warm the interpreter/import path in the background. The warmup
+        // response is diagnostic only; it does not consume a query slot.
+        try {
+          turnBridge.stdin.write(
+            `${JSON.stringify({ op: "warmup", request_id: "warmup" })}\n`,
+          );
+        } catch (error) {
+          diag(`bridge warmup write failed: ${error?.stack || error}`);
+        }
       } catch (error) {
         diag(`holographic bridge start failed: ${error?.stack || error}`);
         turnBridge = null;
@@ -508,7 +570,11 @@ export function apply(ctx, config) {
           resolve(value);
         };
         const onAbort = () => finish(null);
-        timer = setTimeout(() => finish(null), timeoutMs);
+        // First wake can spend 6-12s loading the local embedding model. Give
+        // only the first request the long budget; later requests use 800ms.
+        const effectiveTimeout = bridgeColdStart ? 15000 : timeoutMs;
+        bridgeColdStart = false;
+        timer = setTimeout(() => finish(null), effectiveTimeout);
         if (signal) {
           if (signal.aborted) {
             finish(null);
@@ -533,9 +599,18 @@ export function apply(ctx, config) {
         }
       });
 
-    const probeRuntime = (pythonPath, timeoutMs = 5000) =>
+    const probeRuntime = (
+      pythonPath,
+      configuredCache = "",
+      timeoutMs = 5000,
+    ) =>
       new Promise((resolve) => {
         const python = resolvePython(pythonPath);
+        const cache = resolveCache(configuredCache);
+        if (!cache.path) {
+          resolve({ ok: false, error: cache.error, cache });
+          return;
+        }
         let child = null;
         let settled = false;
         let timer = null;
@@ -558,9 +633,9 @@ export function apply(ctx, config) {
             env: {
               ...process.env,
               DSH_DREAM_PYTHON: python,
-              DSH_DREAM_HF_CACHE: HF_HOME,
-              HF_HOME,
-              HF_HUB_CACHE: resolve(HF_HOME, "hub"),
+              DSH_DREAM_HF_CACHE: cache.path,
+              HF_HOME: cache.path,
+              HF_HUB_CACHE: resolve(cache.path, "hub"),
             },
             stdio: ["ignore", "pipe", "pipe"],
             windowsHide: true,
@@ -589,6 +664,7 @@ export function apply(ctx, config) {
               missing: Array.isArray(payload.missing) ? payload.missing : [],
               python: payload.python || python,
               code,
+              cache,
               error: payload.ok === true ? "" : stderr.trim(),
             });
           } catch (error) {
@@ -659,8 +735,15 @@ export function apply(ctx, config) {
         );
         return decision;
       }
+      const hits = Array.isArray(result?.result?.results)
+        ? result.result.results.slice(0, 3)
+        : [];
       const hint = memoryHint(result?.result);
-      if (!hint || signal?.aborted) return decision;
+      if (!hint || signal?.aborted) {
+        holoLog("Pre-retrieval skipped: no matching memories");
+        return decision;
+      }
+      holoLog(`Pre-retrieval success: injected ${hits.length} memories`);
       const context = createUserMessage({
         content: [{ type: "text", text: hint }],
         source: { kind: "user" },
@@ -670,6 +753,14 @@ export function apply(ctx, config) {
         messages: [context, ...decision.messages],
       };
     };
+
+    // Silent cold-start warmup: start the bridge and let the Python warmup
+    // request import the model in the background, without blocking activation.
+    try {
+      ensureTurnBridge();
+    } catch (error) {
+      diag(`background warmup failed: ${error?.stack || error}`);
+    }
 
     const onSessionEvent = (session, event) => {
       if (!session || !event || !event.type) return;
@@ -940,7 +1031,10 @@ export function apply(ctx, config) {
               }
               try {
                 const bridgeConfig = readBridgeFile(target);
-                const status = await probeRuntime(bridgeConfig?.python_path);
+                const status = await probeRuntime(
+                  bridgeConfig?.python_path,
+                  bridgeConfig?.hf_home_path,
+                );
                 res.writeHead(200, { "content-type": "application/json" });
                 res.end(JSON.stringify(status));
               } catch (error) {

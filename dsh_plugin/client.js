@@ -37,10 +37,16 @@ window.__ModuleLoader__.load({
       pythonPathHint:
         'Optional absolute path to a Python with chromadb and sentence-transformers. Leave blank to auto-detect an adjacent .venv or PATH, then restart DSH.',
       pythonPathPlaceholder: 'Auto-detect .venv or PATH',
+      hfHome: 'Model cache directory',
+      hfHomeHint:
+        'Optional writable directory for Hugging Face models. Leave blank to try the DSH profile, plugin, and working-directory .hf-cache locations.',
+      hfHomePlaceholder: 'Auto-detect a writable cache',
       runtimeCheck: 'Runtime check',
       runtimeChecking: 'Checking Python runtime…',
       runtimeOk: 'Python runtime is ready.',
       runtimeMissing: 'Missing Python packages:',
+      runtimeCacheError:
+        'Model cache directory is not writable; specify one in Settings.',
       runtimeUnknown: 'Python runtime could not be checked.',
       embeddingTitle: 'Embedding model (advanced)',
       embeddingWarning:
@@ -103,10 +109,15 @@ window.__ModuleLoader__.load({
       pythonPathHint:
         '可选。填写已安装 chromadb 与 sentence-transformers 的 Python 绝对路径；留空则自动查找相邻 .venv 或系统 PATH，修改后需重启 DSH。',
       pythonPathPlaceholder: '自动查找 .venv 或 PATH',
+      hfHome: '模型缓存目录',
+      hfHomeHint:
+        '可选。填写可写的 Hugging Face 模型缓存目录；留空则依次尝试 DSH Profile、插件目录与当前工作目录下的 .hf-cache。',
+      hfHomePlaceholder: '自动寻找可写缓存目录',
       runtimeCheck: '运行环境检查',
       runtimeChecking: '正在检查 Python 运行环境…',
       runtimeOk: 'Python 运行环境正常。',
       runtimeMissing: '缺少 Python 依赖：',
+      runtimeCacheError: '模型缓存目录不可写，请手动在设置中指定目录',
       runtimeUnknown: '无法检查 Python 运行环境。',
       embeddingTitle: 'Embedding 模型（高阶）',
       embeddingWarning:
@@ -377,6 +388,7 @@ window.__ModuleLoader__.load({
         enable: current.enable_memory !== false,
         ragPath: String(current.rag_path ?? ''),
         pythonPath: String(current.python_path ?? ''),
+        hfHomePath: String(current.hf_home_path ?? ''),
         max: String(current.max_window_tokens ?? 1500),
         top: String(current.retrieval_top_k ?? 5),
         embeddingProvider:
@@ -469,6 +481,7 @@ window.__ModuleLoader__.load({
       const [runtime, setRuntime] = React.useState({
         state: 'checking',
         missing: [],
+        cacheError: '',
       });
 
       React.useEffect(() => {
@@ -480,10 +493,13 @@ window.__ModuleLoader__.load({
             setRuntime({
               state: result?.ok ? 'ok' : 'missing',
               missing: Array.isArray(result?.missing) ? result.missing : [],
+              cacheError: result?.cache?.error || '',
             });
           })
           .catch(() => {
-            if (active) setRuntime({ state: 'unknown', missing: [] });
+            if (active) {
+              setRuntime({ state: 'unknown', missing: [], cacheError: '' });
+            }
           });
         return () => {
           active = false;
@@ -528,14 +544,17 @@ window.__ModuleLoader__.load({
       const disabled = !writable || saving;
       const ragPath = String(draft.ragPath || '');
       const pythonPath = String(draft.pythonPath || '');
+      const hfHomePath = String(draft.hfHomePath || '');
       const runtimeText =
         runtime.state === 'checking'
           ? tr('runtimeChecking')
-          : runtime.state === 'ok'
-            ? tr('runtimeOk')
-            : runtime.state === 'missing'
-              ? `${tr('runtimeMissing')} ${runtime.missing.join(', ')}`.trim()
-              : tr('runtimeUnknown');
+          : runtime.cacheError
+            ? tr('runtimeCacheError')
+            : runtime.state === 'ok'
+              ? tr('runtimeOk')
+              : runtime.state === 'missing'
+                ? `${tr('runtimeMissing')} ${runtime.missing.join(', ')}`.trim()
+                : tr('runtimeUnknown');
 
       const pushBridge = async (payload) => {
         console.log('🔥 [Client] 推送配置到 Host', {
@@ -591,6 +610,7 @@ window.__ModuleLoader__.load({
           enable_memory: draft.enable,
           rag_path: String(draft.ragPath || '').trim(),
           python_path: String(draft.pythonPath || '').trim(),
+          hf_home_path: String(draft.hfHomePath || '').trim(),
           max_window_tokens: parsed.max,
           retrieval_top_k: parsed.top,
           embedding_provider: parsed.provider,
@@ -618,6 +638,11 @@ window.__ModuleLoader__.load({
                 op: 'set',
                 path: ['python_path'],
                 value: String(draft.pythonPath || '').trim(),
+              },
+              {
+                op: 'set',
+                path: ['hf_home_path'],
+                value: String(draft.hfHomePath || '').trim(),
               },
               {
                 op: 'set',
@@ -836,6 +861,29 @@ window.__ModuleLoader__.load({
               placeholder: tr('pythonPathPlaceholder'),
               disabled,
               onChange: (event) => edit({ pythonPath: event.target.value }),
+            }),
+          ),
+          h(
+            'div',
+            { className: 'am-row' },
+            h(
+              'div',
+              { className: 'am-copy' },
+              h(
+                'label',
+                { className: 'am-label', htmlFor: 'am-hf-home' },
+                tr('hfHome'),
+              ),
+              h('div', { className: 'am-hint' }, tr('hfHomeHint')),
+            ),
+            h('input', {
+              id: 'am-hf-home',
+              className: 'am-input',
+              type: 'text',
+              value: hfHomePath,
+              placeholder: tr('hfHomePlaceholder'),
+              disabled,
+              onChange: (event) => edit({ hfHomePath: event.target.value }),
             }),
           ),
           h(
