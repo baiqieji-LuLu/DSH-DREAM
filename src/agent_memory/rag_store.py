@@ -32,6 +32,7 @@ import urllib.request
 import uuid
 from collections.abc import Iterable, Mapping, Sequence
 from dataclasses import dataclass
+from functools import cmp_to_key
 
 from .embedding.onnx_bge import OnnxBgeEmbedding, find_onnx_assets
 from .storage.chroma_backend import ChromaVectorBackend
@@ -291,6 +292,7 @@ class MemoryHit:
     metadata: Mapping[str, MetadataValue]
     distance: float | None = None
     similarity: float | None = None
+    rrf_score: float | None = None
     retrieval_source: str = "vector"
 
 
@@ -1002,8 +1004,21 @@ class RAGStore:
                     hit.memory_id,
                 )
             )
+            print(
+                f"[Retrieval] Returned {len(timeline)} memories, "
+                "sorted by: timestamp ascending (timeline).",
+                file=sys.stderr,
+                flush=True,
+            )
             return timeline
-        return self._rerank_recency(fused, query_text)[:top_k]
+        reranked = self._rerank_recency(fused, query_text)[:top_k]
+        print(
+            f"[Retrieval] Returned {len(reranked)} memories, "
+            "sorted by: RRF + 时间衰减.",
+            file=sys.stderr,
+            flush=True,
+        )
+        return reranked
 
     def search_vector(
         self,
@@ -1283,7 +1298,39 @@ class RAGStore:
                 )
             )
             ordered.extend(latest)
-        return self._fact_first_within_timestamp(ordered)
+        return self._temporal_rerank(
+            self._fact_first_within_timestamp(ordered)
+        )
+
+    @classmethod
+    def _temporal_rerank(cls, hits: list[MemoryHit]) -> list[MemoryHit]:
+        """Prefer newer records when RRF scores are effectively tied.
+
+        RRF scores are intentionally coarse; a 0.05 band lets a newer record
+        overtake an older one only when their semantic/fusion relevance is
+        close, while clearly more relevant older records keep their lead.
+        """
+        if len(hits) < 2:
+            return hits
+        # Facts are explicit, high-priority highlights for a turn. Keep the
+        # existing fact-first ordering when any fact survives conflict
+        # resolution; temporal tie-breaking applies to dialogue memories.
+        if any(hit.source_type == "system_fact" for hit in hits):
+            return hits
+
+        def compare(left: MemoryHit, right: MemoryHit) -> int:
+            left_score = float(left.rrf_score or 0.0)
+            right_score = float(right.rrf_score or 0.0)
+            if abs(left_score - right_score) <= 0.05:
+                left_ts = cls._hit_timestamp_ms(left)
+                right_ts = cls._hit_timestamp_ms(right)
+                if left_ts != right_ts:
+                    return -1 if left_ts > right_ts else 1
+            if left_score != right_score:
+                return -1 if left_score > right_score else 1
+            return 0
+
+        return sorted(hits, key=cmp_to_key(compare))
 
     @staticmethod
     def _fact_first_within_timestamp(hits: list[MemoryHit]) -> list[MemoryHit]:
@@ -1318,13 +1365,23 @@ class RAGStore:
         share an entity phrase.  Timeline actions such as "bought", "broke",
         "bought a replacement" have no state-slot pair and are not grouped.
         """
+        shared_phrase = cls._longest_common_substring_length(
+            left.content, right.content
+        )
+        # Explicit replacement is an exclusive-state mutation even when the
+        # older sentence has no state-slot cue: "喜欢马蹄糕" ->
+        # "把马蹄糕换成柠檬牛肉球". Event evolution (bought/broke/replaced)
+        # has no replacement cue and must remain intact.
+        if shared_phrase >= 3 and (
+            cls._has_exclusive_replacement(left.content)
+            or cls._has_exclusive_replacement(right.content)
+        ):
+            return True
+
         left_slots = cls._state_slots(left.content)
         right_slots = cls._state_slots(right.content)
         if not left_slots or not right_slots:
             return False
-        shared_phrase = cls._longest_common_substring_length(
-            left.content, right.content
-        )
         for left_family, left_value in left_slots:
             for right_family, right_value in right_slots:
                 if left_family != right_family:
@@ -1339,6 +1396,15 @@ class RAGStore:
                 if shared_phrase >= minimum_shared:
                     return True
         return False
+
+    @staticmethod
+    def _has_exclusive_replacement(text: str) -> bool:
+        return bool(
+            re.search(
+                r"(换成|改成|改为|替换为|替换成|不再|现在喜欢|现在最爱)",
+                text,
+            )
+        )
 
     @classmethod
     def _state_slots(cls, text: str) -> list[tuple[str, str]]:
@@ -1503,6 +1569,7 @@ class RAGStore:
                     metadata=hit.metadata,
                     distance=hit.distance,
                     similarity=hit.similarity,
+                    rrf_score=entry["score"],
                     retrieval_source="hybrid",
                 )
             elif "bm25" in sources:
@@ -1513,6 +1580,7 @@ class RAGStore:
                     metadata=hit.metadata,
                     distance=None,
                     similarity=None,
+                    rrf_score=entry["score"],
                     retrieval_source="bm25",
                 )
             else:
@@ -1523,6 +1591,7 @@ class RAGStore:
                     metadata=hit.metadata,
                     distance=hit.distance,
                     similarity=hit.similarity,
+                    rrf_score=entry["score"],
                     retrieval_source="vector",
                 )
             fused.append(hit)

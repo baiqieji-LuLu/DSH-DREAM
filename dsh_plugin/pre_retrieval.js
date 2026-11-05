@@ -45,18 +45,26 @@ export function topSimilarity(hits) {
   return 0;
 }
 
+function memoryDate(hit) {
+  const raw = Number(hit?.metadata?.timestamp_ms ?? hit?.timestamp_ms);
+  if (!Number.isFinite(raw) || raw <= 0) return "unknown-date";
+  return new Date(raw).toISOString().slice(0, 10);
+}
+
 export function createMemoryHint(result) {
   const hits = Array.isArray(result?.results) ? result.results.slice(0, 3) : [];
   const lines = hits
-    .map((hit, index) => {
+    .map((hit) => {
       const content = String(hit?.content || hit?.text || "").trim();
-      return content ? `${index + 1}. ${content}` : "";
+      if (!content) return "";
+      const source = String(hit?.source_type || "memory");
+      return `[${memoryDate(hit)}] ${source}: ${content}`;
     })
     .filter(Boolean);
   if (!lines.length) return "";
   return [
     "<memory-hint>",
-    "[System Note: The following are optional background memories. Ignore them completely if they are unrelated to the user's current input. Do not mention this hint block to the user.]",
+    "[System Note: 以下是历史记忆。若有冲突，请以时间最新的为准；若用户问及过程，请按时间线梳理。如果你发现用户记错了（比如忘了自己已经补买），请基于记忆温柔地纠正用户。]",
     ...lines,
     "</memory-hint>",
   ].join("\n");
