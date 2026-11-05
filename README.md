@@ -1,10 +1,10 @@
 # DSH-DREAM
 
-> Status: v0.5.0 Pre-Alpha
+> Status: v0.3.6 Pre-Alpha
 
 **DSH-DREAM: Durable RAG-Enhanced Agent Memory**
 
-**[English](README_EN.md) | [简体中文](README_CN.md)**
+**[English](README.md) | [简体中文](README_CN.md)**
 
 ![DSH-DREAM](docs/assets/DSH-DREAM.png)
 
@@ -26,29 +26,18 @@ by default; only the short retrieved context is sent to the LLM.
 
 ## 2. Quick Start
 
-### A. DSH client (recommended for most users)
+**First Run Notice:**
+This plugin utilizes a local RAG engine. On first startup, the system will automatically provision a lightweight runtime and download a local embedding model (approx. 95MB). The download and setup time depends on network conditions; please wait for the UI prompt. Subsequent retrievals will maintain lower latency.
 
-**1. Download and extract the release package.**
+**Environment:** Python 3.10+ for local development; Marketplace installs provision the runtime automatically.
 
-Download the `release_v0.2.0_prealpha` ZIP from the project's GitHub Releases page (or use the
-package supplied by the maintainer), then open PowerShell in the extracted folder:
+### A. DSH Plugin Marketplace (recommended)
 
-```powershell
-Expand-Archive .\DSH-DREAM-v0.2.0-prealpha.zip -DestinationPath .\DSH-DREAM
-cd .\DSH-DREAM
-```
+Open the DSH Plugin Marketplace, search for **DSH-DREAM**, and click Install. On first
+startup the plugin automatically provisions a lightweight Python runtime (using `uv`) and
+downloads the local ONNX model (approx. 95MB). Please wait for the UI prompt to complete.
 
-**2. Run the installer.**
-
-```powershell
-powershell -ExecutionPolicy Bypass -File .\install-agent-memory-plugin.ps1 -Force
-```
-
-If PowerShell blocks the script, use the command above rather than changing the machine-wide
-execution policy permanently. The installer registers the bundle in the DSH profile and
-prepares the local bridge file.
-
-**3. Set the model key (only if you use an LLM).**
+**1. Set the model key (only if you use an LLM).**
 
 Local embedding and retrieval do not require an API key. To let the assistant generate
 replies with DeepSeek, set the key **before starting DSH**:
@@ -62,7 +51,7 @@ setx DEEPSEEK_API_KEY "sk-your-key-here"
 
 Do not commit the key, paste it into a README, or put it in a tracked config file.
 
-**4. Open DSH Settings.**
+**2. Open DSH Settings.**
 
 Go to **Settings → DSH-DREAM** (the panel may also appear under the plugin/settings section
 of your DSH build). Turn on:
@@ -72,7 +61,7 @@ of your DSH build). Turn on:
   where the model extracted a fact.
 
 Click **Save**, then send a test message. The first retrieval may take a few seconds while
-the local Chroma collection and embedding model are initialized.
+the local vector database and embedding model are initialized.
 
 ### B. Python library (recommended for developers)
 
@@ -164,6 +153,7 @@ preserved; cloud re-embedding consumes tokens, so back up `.chroma` before switc
 - **State-slot conflict detection, not blanket latest-wins.** Only a direct location/state
   change (“key in the shoe cabinet” → “key in the flower pot”) is collapsed. A sequence such
   as “bought a mug → broke it → bought a replacement” is preserved.
+- **Dual-track Memory.** Distinguishes between state updates and event timelines. Conflict resolution overrides outdated preferences while retaining the full timeline of evolving events.
 - **Timeline retrieval.** `timeline_mode=True` skips conflict collapsing and returns the
   relevant raw memories in ascending timestamp order.
 - **Local-first by default.** Retrieval uses local Chroma plus BM25; the LLM only sees a
@@ -269,6 +259,28 @@ DSH-DREAM/
 Special thanks to BH4FKW for providing the core theoretical framework, technical path design, and rigorous review throughout this project.
 
 特别致谢 BH4FKW 为本项目提供的核心技术路径指导、架构设计建议与严谨评审。
+
+## Dependencies & Credits
+
+This project is built on the following open-source projects and models. They are not bundled; they are installed dynamically through standard package managers.
+
+**Python core dependencies:**
+
+- [ChromaDB](https://github.com/chroma-core/chroma) (Apache-2.0) - Local vector database
+- [sentence-transformers](https://github.com/UKPLab/sentence-transformers) (Apache-2.0) - Embedding model framework
+- [PyTorch](https://github.com/pytorch/pytorch) (BSD-3-Clause) - Deep-learning runtime
+- [rank-bm25](https://github.com/dorianbrown/rank_bm25) (Apache-2.0) - BM25 keyword retrieval
+- [latex2mathml](https://github.com/roniemartinez/latex2mathml) (MIT) - LaTeX-to-MathML conversion
+
+**AI model:**
+
+- [BAAI/bge-small-zh-v1.5](https://huggingface.co/BAAI/bge-small-zh-v1.5) (MIT) - Local Chinese embedding model
+
+**DSH plugin ecosystem dependency:**
+
+- [@deepseek-ai/schemastery](https://github.com/deepseek-ai) (DSH Official) - DSH native UI rendering engine
+
+Thanks to these open-source pioneers for making cyber memory possible.
 
 ## License
 

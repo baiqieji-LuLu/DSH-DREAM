@@ -4,7 +4,7 @@
 
 **DSH-DREAM: Durable RAG-Enhanced Agent Memory**
 
-**[English](README_EN.md) | [简体中文](README_CN.md)**
+**[English](README.md) | [简体中文](README_CN.md)**
 
 ![DSH-DREAM](docs/assets/DSH-DREAM.png)
 
