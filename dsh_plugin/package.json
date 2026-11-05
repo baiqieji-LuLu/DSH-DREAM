@@ -5,6 +5,9 @@
   "private": true,
   "type": "module",
   "main": "./index.js",
+  "engines": {
+    "dsh": ">=0.2.1"
+  },
   "description": "DSH-native settings panel for the DSH-DREAM Python package.",
   "exports": {
     ".": "./index.js",
