@@ -1,6 +1,6 @@
 # DSH-DREAM
 
-> Status: v0.3.5 Pre-Alpha
+> Status: v0.3.6 Pre-Alpha
 
 **DSH-DREAM: Durable RAG-Enhanced Agent Memory**
 
@@ -126,6 +126,7 @@ API key:   your Zhipu key
 - **四层边界。** 锚点（硬约束）、最近窗口、检索记忆和审计快照各自独立。
 - **全息记忆。** `assistant_message` 已加入白名单，与 `user_message`、`system_fact`、`tool_result` 并列；`model_hint` 永远拒绝。`MemoryAgent` 会无条件双写完整回合；DSH 全息模式会在 `agent/turn-stopping` 强制写入。
 - **状态槽位冲突检测，而不是无差别 latest-wins。** 只有直接的位置/状态变化（“钥匙在鞋柜” → “钥匙在花盆”）才会折叠；像“买了杯子 → 摔碎 → 买新的补上”这样的动作序列会完整保留。
+- **双轨记忆（Dual-track Memory）。** 支持自动区分“状态更新”与“历史事件流变”。对于偏好更改等冲突，自动覆盖旧状态；对于事件演进（如购买与损坏），完整保留时间线。
 - **时间线检索。** `timeline_mode=True` 会跳过冲突折叠，按时间戳升序返回相关原始记忆。
 - **默认本地优先。** 检索使用本地 Chroma + BM25；LLM 只拿到紧凑的证据块，而不是整个数据库。
 - **可审计。** 每次请求记录召回 chunk、窗口哈希和锚点版本。

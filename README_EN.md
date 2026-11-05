@@ -1,6 +1,6 @@
 # DSH-DREAM
 
-> Status: v0.3.5 Pre-Alpha
+> Status: v0.3.6 Pre-Alpha
 
 **DSH-DREAM: Durable RAG-Enhanced Agent Memory**
 
@@ -153,6 +153,7 @@ preserved; cloud re-embedding consumes tokens, so back up `.chroma` before switc
 - **State-slot conflict detection, not blanket latest-wins.** Only a direct location/state
   change (“key in the shoe cabinet” → “key in the flower pot”) is collapsed. A sequence such
   as “bought a mug → broke it → bought a replacement” is preserved.
+- **Dual-track Memory.** Distinguishes between state updates and event timelines. Conflict resolution overrides outdated preferences while retaining the full timeline of evolving events.
 - **Timeline retrieval.** `timeline_mode=True` skips conflict collapsing and returns the
   relevant raw memories in ascending timestamp order.
 - **Local-first by default.** Retrieval uses local Chroma plus BM25; the LLM only sees a
