@@ -106,8 +106,14 @@ class SqliteVecBackend:
                     "SELECT rowid FROM memories WHERE memory_id = ?",
                     (memory_id,),
                 ).fetchone()[0]
+                # vec0 does not implement INSERT OR REPLACE: re-adding an
+                # existing row aborts with "UNIQUE constraint failed", so an
+                # upsert must delete the old vector first.
                 self._conn.execute(
-                    "INSERT OR REPLACE INTO vec_memories(rowid, embedding) VALUES (?, ?)",
+                    "DELETE FROM vec_memories WHERE rowid = ?", (rowid,)
+                )
+                self._conn.execute(
+                    "INSERT INTO vec_memories(rowid, embedding) VALUES (?, ?)",
                     (rowid, self._vector(vector)),
                 )
 
@@ -201,22 +207,38 @@ class SqliteVecBackend:
         offset: int = 0,
         include: Sequence[str],
     ) -> dict[str, list[Any]]:
-        sql = "SELECT memory_id, document, metadata_json FROM memories"
+        wanted = {str(item) for item in (include or [])}
+        want_embeddings = "embeddings" in wanted
+        if want_embeddings:
+            sql = (
+                "SELECT m.memory_id, m.document, m.metadata_json, v.embedding "
+                "FROM memories AS m JOIN vec_memories AS v ON v.rowid = m.rowid"
+            )
+        else:
+            sql = "SELECT m.memory_id, m.document, m.metadata_json FROM memories AS m"
         params: list[Any] = []
         if ids is not None:
             placeholders = ",".join("?" for _ in ids)
-            sql += f" WHERE memory_id IN ({placeholders})"
+            sql += f" WHERE m.memory_id IN ({placeholders})"
             params.extend(ids)
-        sql += " ORDER BY rowid"
+        sql += " ORDER BY m.rowid"
         if limit is not None:
             sql += " LIMIT ? OFFSET ?"
             params.extend([int(limit), int(offset)])
         rows = self._conn.execute(sql, params).fetchall()
+        # vec0 stores the vector as a float32 blob; the RAG store's corpus cache
+        # requires one vector per id, so an empty list here would silently
+        # disable Flat search and BM25 for the whole corpus.
+        embeddings = (
+            [np.frombuffer(row[3], dtype=np.float32).copy() for row in rows]
+            if want_embeddings
+            else []
+        )
         return {
             "ids": [row[0] for row in rows],
             "documents": [row[1] for row in rows],
             "metadatas": [json.loads(row[2]) for row in rows],
-            "embeddings": [],
+            "embeddings": embeddings,
         }
 
     def delete(self, ids: Sequence[str]) -> None:
