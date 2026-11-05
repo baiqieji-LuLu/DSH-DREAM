@@ -951,6 +951,38 @@ class RAGStore:
             timeline_mode=timeline_mode,
         )
 
+    @staticmethod
+    def _query_intent(query: str) -> str:
+        """Classify a query as current, timeline/history, or time lookup.
+
+        History cues deliberately win over current-state cues: a question like
+        "以前……现在换成什么" must return the whole evolution, not only the
+        latest value.
+        """
+        text = query.casefold()
+        time_cues = ("什么时候", "哪天", "哪一天", "几号", "何时", "日期")
+        history_cues = (
+            "以前",
+            "原来",
+            "曾经",
+            "之前",
+            "历史",
+            "过程",
+            "怎么",
+            "变化",
+            "换成",
+            "改成",
+            "替换",
+        )
+        current_cues = ("现在", "当前", "目前", "最新", "如今", "最近")
+        if any(cue in text for cue in time_cues):
+            return "time"
+        if any(cue in text for cue in history_cues):
+            return "timeline"
+        if any(cue in text for cue in current_cues):
+            return "current"
+        return "current"
+
     def search_memory(
         self,
         query: str,
@@ -996,7 +1028,9 @@ class RAGStore:
             selected_types=selected_types,
         )
         fused = self._rrf_fuse(vector_hits, bm25_hits)
-        if timeline_mode:
+        intent = self._query_intent(query_text)
+        timeline_like = timeline_mode or intent in {"timeline", "time"}
+        if timeline_like:
             timeline = fused[:top_k]
             timeline.sort(
                 key=lambda hit: (
@@ -1006,7 +1040,7 @@ class RAGStore:
             )
             print(
                 f"[Retrieval] Returned {len(timeline)} memories, "
-                "sorted by: timestamp ascending (timeline).",
+                f"intent={intent}, sorted by: timestamp ascending (timeline).",
                 file=sys.stderr,
                 flush=True,
             )
@@ -1014,7 +1048,7 @@ class RAGStore:
         reranked = self._rerank_recency(fused, query_text)[:top_k]
         print(
             f"[Retrieval] Returned {len(reranked)} memories, "
-            "sorted by: RRF + 时间衰减.",
+            f"intent={intent}, sorted by: RRF + 时间衰减.",
             file=sys.stderr,
             flush=True,
         )

@@ -52,8 +52,16 @@ function memoryDate(hit) {
 }
 
 export function createMemoryHint(result) {
-  const hits = Array.isArray(result?.results) ? result.results.slice(0, 3) : [];
-  const lines = hits
+  const hits = Array.isArray(result?.results)
+    ? result.results.slice(0, 3)
+    : [];
+  const ordered = [...hits].sort((left, right) => {
+    const leftTs = Number(left?.metadata?.timestamp_ms ?? left?.timestamp_ms) || 0;
+    const rightTs =
+      Number(right?.metadata?.timestamp_ms ?? right?.timestamp_ms) || 0;
+    return leftTs - rightTs;
+  });
+  const lines = ordered
     .map((hit) => {
       const content = String(hit?.content || hit?.text || "").trim();
       if (!content) return "";
@@ -64,7 +72,7 @@ export function createMemoryHint(result) {
   if (!lines.length) return "";
   return [
     "<memory-hint>",
-    "[System Note: 以下是历史记忆。若有冲突，请以时间最新的为准；若用户问及过程，请按时间线梳理。如果你发现用户记错了（比如忘了自己已经补买），请基于记忆温柔地纠正用户。]",
+    "[System Note: 以下是按时间顺序整理的历史记忆。若用户问及当前状态，请以最新记录为准；若问及流变过程，请说明前因后果。]",
     ...lines,
     "</memory-hint>",
   ].join("\n");

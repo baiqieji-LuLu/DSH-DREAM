@@ -83,6 +83,46 @@ def test_preference_replacement_collapses_old_value(plugin) -> None:
     assert texts[0] == "把马蹄糕换成柠檬牛肉球"
     assert "我最喜欢的菜是马蹄糕" not in texts
     assert "柠檬牛肉球" in texts[0]
+    # Latest-wins is an injection-time projection, never a physical delete.
+    assert plugin.rag_store.count() == 4
+
+
+def test_history_intent_returns_old_and_new_in_order(plugin) -> None:
+    plugin.memory_add_turn("我最喜欢的菜是马蹄糕", "记住了")
+    plugin.memory_add_turn("把马蹄糕换成柠檬牛肉球", "好的，已经更新")
+
+    result = plugin.memory_search(
+        "我以前喜欢吃什么，现在换成什么了？",
+        top_k=10,
+    )
+    user_hits = [
+        row
+        for row in result["results"]
+        if row["source_type"] == "user_message"
+    ]
+    texts = [row["content"] for row in user_hits]
+
+    assert "我最喜欢的菜是马蹄糕" in texts
+    assert "把马蹄糕换成柠檬牛肉球" in texts
+    assert texts.index("我最喜欢的菜是马蹄糕") < texts.index(
+        "把马蹄糕换成柠檬牛肉球"
+    )
+    stamps = [row["metadata"]["timestamp_ms"] for row in user_hits]
+    assert stamps == sorted(stamps)
+
+
+def test_time_intent_finds_replacement_date(plugin) -> None:
+    plugin.memory_add_turn("我最喜欢的菜是马蹄糕", "记住了")
+    plugin.memory_add_turn("把马蹄糕换成柠檬牛肉球", "好的，已经更新")
+
+    result = plugin.memory_search(
+        "我什么时候跟你说要换牛肉球的？",
+        top_k=10,
+    )
+    texts = _user_texts(result)
+
+    assert any("把马蹄糕换成柠檬牛肉球" in text for text in texts)
+    assert all("timestamp_ms" in row["metadata"] for row in result["results"])
 
 
 def test_event_evolution_is_preserved_in_timeline(plugin) -> None:
