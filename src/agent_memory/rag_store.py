@@ -62,12 +62,26 @@ ALLOWED_SOURCE_TYPES: Final[frozenset[str]] = frozenset(
 FORBIDDEN_SOURCE_TYPES: Final[frozenset[str]] = frozenset({"model_hint"})
 """Source types that are always rejected, even on reads."""
 
+DEFAULT_TIME_SOURCE: Final[str] = "live"
+"""Provenance label stored in ``metadata["time_source"]`` for new records."""
+
+ALLOWED_TIME_SOURCES: Final[frozenset[str]] = frozenset(
+    {"live", "archive_reconstructed", "imported"}
+)
+"""Accepted ``time_source`` labels.
+
+``live`` covers anything written while the plugin is running.
+``archive_reconstructed`` marks rows whose timestamps were rebuilt from an
+exported share long after the fact, so a "recent N days" query can exclude
+them by passing ``time_source="live"``.
+"""
+
 SourceType: TypeAlias = Literal[
     "user_message", "system_fact", "tool_result", "assistant_message"
 ]
 MetadataValue: TypeAlias = str | int | float | bool
 _RESERVED_METADATA_KEYS: Final[frozenset[str]] = frozenset(
-    {"source_type", "created_at", "timestamp_ms", "content_sha256"}
+    {"source_type", "created_at", "timestamp_ms", "content_sha256", "time_source"}
 )
 _DEFAULT_MODEL: Final[str] = "BAAI/bge-small-zh-v1.5"
 _FALLBACK_MODEL: Final[str] = "all-MiniLM-L6-v2"
@@ -155,6 +169,32 @@ def validate_source_type(source_type: str, *, for_filter: bool = False) -> Sourc
             f"unsupported source_type {source_type!r}; expected one of: {allowed}"
         )
     return cast(SourceType, normalized)
+
+
+def validate_time_source(time_source: str) -> str:
+    """Validate and normalize a timestamp provenance label.
+
+    中文说明：校验时间戳来源标签。``live`` 为实时写入，
+    ``archive_reconstructed`` 为事后从分享链接重建的时间。
+
+    Args:
+        time_source: Caller-provided label.
+
+    Returns:
+        The normalized lower-case label.
+
+    Raises:
+        MemoryValidationError: If the label is empty or unknown.
+    """
+    if not isinstance(time_source, str):
+        raise MemoryValidationError("time_source must be a string")
+    normalized = time_source.strip().lower()
+    if normalized not in ALLOWED_TIME_SOURCES:
+        allowed = ", ".join(sorted(ALLOWED_TIME_SOURCES))
+        raise MemoryValidationError(
+            f"unsupported time_source {time_source!r}; expected one of: {allowed}"
+        )
+    return normalized
 
 
 class OpenAICompatibleEmbeddingFunction:
@@ -831,6 +871,7 @@ class RAGStore:
         metadata: Mapping[str, MetadataValue] | None = None,
         memory_id: str | None = None,
         timestamp_ms: int | None = None,
+        time_source: str = DEFAULT_TIME_SOURCE,
     ) -> str:
         """Embed and persist one trusted memory.
 
@@ -850,6 +891,11 @@ class RAGStore:
                 dual-write callers so the original user message and extracted
                 fact share exactly the same timestamp. When omitted, a fresh
                 monotonic timestamp is generated.
+            time_source: Provenance of the timestamp. Defaults to ``live``.
+                ``archive_reconstructed`` marks rows whose timestamps were
+                rebuilt from an exported share after the fact. It is always
+                returned in ``metadata["time_source"]`` so callers can filter
+                "recent N days" statistics to live records only.
 
         Returns:
             The stored memory ID.
@@ -861,6 +907,7 @@ class RAGStore:
                 invalid.
         """
         normalized_source = validate_source_type(source_type)
+        normalized_time_source = validate_time_source(time_source)
         text = self._validate_content(content)
         record_id = self._validate_memory_id(memory_id)
         custom_metadata = self._validate_metadata(metadata)
@@ -868,6 +915,7 @@ class RAGStore:
         timestamp_ms = self._resolve_timestamp_ms(timestamp_ms)
         stored_metadata: dict[str, MetadataValue] = dict(custom_metadata)
         stored_metadata["source_type"] = normalized_source
+        stored_metadata["time_source"] = normalized_time_source
         stored_metadata["created_at"] = self._utc_now()
         stored_metadata["timestamp_ms"] = timestamp_ms
         stored_metadata["content_sha256"] = hashlib.sha256(text.encode("utf-8")).hexdigest()
@@ -916,6 +964,7 @@ class RAGStore:
             metadatas.append(
                 {
                     "source_type": normalized_source,
+                    "time_source": DEFAULT_TIME_SOURCE,
                     "created_at": created_at,
                     "timestamp_ms": timestamp_ms,
                     "content_sha256": hashlib.sha256(text.encode("utf-8")).hexdigest(),
@@ -939,6 +988,7 @@ class RAGStore:
         *,
         top_k: int = 5,
         source_types: Iterable[str] | None = None,
+        time_source: str | Iterable[str] | None = None,
         min_vector_score: float = MIN_VECTOR_SCORE,
         timeline_mode: bool = False,
     ) -> list[MemoryHit]:
@@ -947,6 +997,7 @@ class RAGStore:
             query,
             top_k=top_k,
             source_types=source_types,
+            time_source=time_source,
             min_vector_score=min_vector_score,
             timeline_mode=timeline_mode,
         )
@@ -989,6 +1040,7 @@ class RAGStore:
         *,
         top_k: int = 5,
         source_types: Iterable[str] | None = None,
+        time_source: str | Iterable[str] | None = None,
         min_vector_score: float = MIN_VECTOR_SCORE,
         timeline_mode: bool = False,
     ) -> list[MemoryHit]:
@@ -1003,6 +1055,12 @@ class RAGStore:
         resolution.  With ``timeline_mode=True`` that step is skipped: the
         Top-K relevant raw memories are returned in ascending
         ``timestamp_ms`` order, preserving a sequence of events.
+
+        ``time_source`` filters on the timestamp provenance marker. Passing
+        ``time_source="live"`` keeps only records written while the plugin was
+        running, which is what a "recent N days" question should see; pass
+        ``"archive_reconstructed"`` to query rebuilt history explicitly.
+        ``None`` (default) mixes both.
         """
         query_text = self._validate_query(query)
         if isinstance(top_k, bool) or not isinstance(top_k, int) or top_k <= 0:
@@ -1014,9 +1072,13 @@ class RAGStore:
         if not isinstance(timeline_mode, bool):
             raise MemoryValidationError("timeline_mode must be a boolean")
         selected_types = self._normalize_source_filter(source_types)
+        selected_time_sources = self._normalize_time_source_filter(time_source)
 
-        # RRF needs a reasonable candidate pool from both retrievers.
+        # RRF needs a reasonable candidate pool from both retrievers. When a
+        # provenance filter is active the pool is widened so top_k survives it.
         candidate_k = max(top_k * 10, 60)
+        if selected_time_sources is not None:
+            candidate_k = max(top_k * 20, 200)
         vector_hits = self._search_vector(
             query_text,
             top_k=candidate_k,
@@ -1028,6 +1090,12 @@ class RAGStore:
             selected_types=selected_types,
         )
         fused = self._rrf_fuse(vector_hits, bm25_hits)
+        if selected_time_sources is not None:
+            fused = [
+                hit
+                for hit in fused
+                if hit.metadata.get("time_source") in selected_time_sources
+            ]
         intent = self._query_intent(query_text)
         timeline_like = timeline_mode or intent in {"timeline", "time"}
         if timeline_like:
@@ -1854,6 +1922,24 @@ class RAGStore:
         return list(value)
 
     @staticmethod
+    def _normalize_time_source_filter(
+        time_source: str | Iterable[str] | None,
+    ) -> set[str] | None:
+        """Normalize the provenance filter to a set of labels, or ``None``."""
+        if time_source is None:
+            return None
+        if isinstance(time_source, str):
+            return {validate_time_source(time_source)}
+        if isinstance(time_source, bytes):
+            raise MemoryValidationError(
+                "time_source must be a string or an iterable of strings"
+            )
+        normalized = {validate_time_source(value) for value in time_source}
+        if not normalized:
+            raise MemoryValidationError("time_source filter must not be empty")
+        return normalized
+
+    @staticmethod
     def _normalize_source_filter(source_types: Iterable[str] | None) -> set[str] | None:
         if source_types is None:
             return None
@@ -2140,6 +2226,8 @@ class RAGStore:
 
 __all__ = [
     "ALLOWED_SOURCE_TYPES",
+    "ALLOWED_TIME_SOURCES",
+    "DEFAULT_TIME_SOURCE",
     "FORBIDDEN_SOURCE_TYPES",
     "ForbiddenSourceTypeError",
     "MemoryHit",
@@ -2151,4 +2239,5 @@ __all__ = [
     "SourceType",
     "SourceTypeError",
     "validate_source_type",
+    "validate_time_source",
 ]

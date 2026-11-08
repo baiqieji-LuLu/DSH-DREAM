@@ -325,6 +325,7 @@ class MemoryPlugin:
         *,
         top_k: int | None = None,
         timeline_mode: bool = False,
+        time_source: str | None = None,
     ) -> dict[str, Any]:
         """Search trusted memory and return a JSON-serializable result.
 
@@ -333,6 +334,9 @@ class MemoryPlugin:
             top_k: Maximum hits; defaults to the configured retrieval top-k.
             timeline_mode: Skip conflict collapsing and return chronological raw
                 memories for history/process questions.
+            time_source: Optional provenance filter (``live`` /
+                ``archive_reconstructed`` / ``imported``). ``live`` keeps a
+                "recent N days" question from mixing in rebuilt archive history.
 
         Returns:
             A dictionary with the normalized query, result count, and hits.
@@ -361,11 +365,15 @@ class MemoryPlugin:
         kwargs: dict[str, Any] = {"top_k": limit}
         if timeline_mode:
             kwargs["timeline_mode"] = True
+        if time_source is not None:
+            kwargs["time_source"] = time_source
         try:
             hits = self._rag_store.search(query_text, **kwargs)
         except TypeError:
             # Compatibility with legacy in-memory backends that only accept
-            # query/top_k. A real RAGStore always supports timeline_mode.
+            # query/top_k. A real RAGStore supports both extra parameters.
+            if time_source is not None:
+                raise
             if not timeline_mode:
                 raise
             kwargs.pop("timeline_mode", None)
@@ -717,16 +725,19 @@ def memory_search(
     *,
     top_k: int | None = None,
     timeline_mode: bool = False,
+    time_source: str | None = None,
 ) -> dict[str, Any]:
     """Tool entry point: search trusted long-term memory.
 
     Use ``timeline_mode=True`` for history/process questions; leave it false for
-    the current state.
+    the current state. ``time_source="live"`` restricts a query to records
+    written while the plugin was running (excludes rebuilt archive history).
     """
     return get_plugin().memory_search(
         query,
         top_k=top_k,
         timeline_mode=timeline_mode,
+        time_source=time_source,
     )
 
 
