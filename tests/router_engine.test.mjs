@@ -25,7 +25,7 @@ import {
   guard,
   normalizeQuery,
 } from "../dsh_plugin/router_regex.js";
-import { CloudRouterError } from "../dsh_plugin/router_cloud.js";
+import { CloudRouter, CloudRouterError } from "../dsh_plugin/router_cloud.js";
 import { registerPreRetrieval } from "../dsh_plugin/pre_retrieval.js";
 
 const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
@@ -542,6 +542,152 @@ test("config normalization clamps the budget and keeps neutral defaults", () => 
   const low = normalizeRouterConfig({ budget_ms: 1 });
   assert.equal(low.budgetMs, 50);
   assert.equal(normalizeRouterConfig({ shadow_mode: true }).shadowMode, true);
+});
+
+// ------------------------------------------------------------- cloud adapter
+
+test("custom cloud endpoint fills preset path/model and sends only the query", async () => {
+  const calls = [];
+  const router = new CloudRouter({
+    getConfig: () => ({
+      router: {
+        threshold: 0.55,
+        uncertainty_band: 0.1,
+        cloud: {
+          enabled: true,
+          active: "custom",
+          providers: {
+            custom: {
+              base_url: "https://ws-x.example.com",
+              path: "",
+              model: "",
+              api_key_env: "",
+            },
+          },
+        },
+      },
+    }),
+    resolveCredential: async () => "",
+    fetchImpl: async (url, init) => {
+      calls.push({ url, init });
+      return {
+        ok: true,
+        status: 200,
+        headers: { get: () => null },
+        json: async () => ({ answers: { need_rag: { noul: 0.93 } } }),
+      };
+    },
+  });
+  const provider = router.providerConfig();
+  assert.equal(provider.path, "/compatible-mode/v1/systemone");
+  assert.equal(provider.model, "decision-model-preview");
+  const result = await router.route(
+    { query: "上次那个蓝色马克杯在哪" },
+    { deadlineMs: 150 },
+  );
+  assert.equal(
+    calls[0].url,
+    "https://ws-x.example.com/compatible-mode/v1/systemone",
+  );
+  assert.equal(result.decision, "retrieve");
+  assert.equal(result.uncertain, false);
+  const body = JSON.parse(calls[0].init.body);
+  assert.equal(body.state, "上次那个蓝色马克杯在哪");
+  assert.equal(Object.keys(body.questions).length, 1);
+  assert.equal(body.questions.need_rag.type, "noul");
+  assert.equal(calls[0].init.headers.authorization, undefined);
+});
+
+test("cloud status codes map to stable error codes with cooldowns", async () => {
+  const makeRouter = (status, headers = { get: () => null }) =>
+    new CloudRouter({
+      getConfig: () => ({
+        router: {
+          cloud: {
+            enabled: true,
+            active: "custom",
+            providers: { custom: { base_url: "https://ws-x.example.com" } },
+          },
+        },
+      }),
+      resolveCredential: async () => "key",
+      fetchImpl: async () => ({ ok: false, status, headers }),
+    });
+  await assert.rejects(
+    makeRouter(401).route({ query: "上次说的那个" }, { deadlineMs: 150 }),
+    (error) => error instanceof CloudRouterError && error.code === "CLOUD_AUTH",
+  );
+  await assert.rejects(
+    makeRouter(451).route({ query: "上次说的那个" }, { deadlineMs: 150 }),
+    (error) => error.code === "CLOUD_REGION",
+  );
+  await assert.rejects(
+    makeRouter(429, { get: () => "2" }).route(
+      { query: "上次说的那个" },
+      { deadlineMs: 150 },
+    ),
+    (error) =>
+      error.code === "CLOUD_RATE_LIMIT" && error.retryAfterMs === 2000,
+  );
+  await assert.rejects(
+    makeRouter(500).route({ query: "上次说的那个" }, { deadlineMs: 150 }),
+    (error) => error.code === "CLOUD_SERVER",
+  );
+});
+
+test("a response without a need_rag answer is a bad response", async () => {
+  const router = new CloudRouter({
+    getConfig: () => ({
+      router: {
+        cloud: {
+          enabled: true,
+          active: "custom",
+          providers: { custom: { base_url: "https://ws-x.example.com" } },
+        },
+      },
+    }),
+    resolveCredential: async () => "",
+    fetchImpl: async () => ({
+      ok: true,
+      status: 200,
+      headers: { get: () => null },
+      json: async () => ({ answers: {} }),
+    }),
+  });
+  await assert.rejects(
+    router.route({ query: "上次说的那个" }, { deadlineMs: 150 }),
+    (error) => error.code === "CLOUD_BAD_RESPONSE",
+  );
+});
+
+test("missing credentials keep the cloud layer out", async () => {
+  let fetched = 0;
+  const router = new CloudRouter({
+    getConfig: () => ({
+      router: {
+        cloud: {
+          enabled: true,
+          active: "custom",
+          providers: {
+            custom: {
+              base_url: "https://ws-x.example.com",
+              api_key_env: "MISSING_KEY",
+            },
+          },
+        },
+      },
+    }),
+    resolveCredential: async () => "",
+    fetchImpl: async () => {
+      fetched += 1;
+      return { ok: true, status: 200, json: async () => ({}) };
+    },
+  });
+  await assert.rejects(
+    router.route({ query: "上次说的那个" }, { deadlineMs: 150 }),
+    (error) => error.code === "CLOUD_NOT_CONFIGURED",
+  );
+  assert.equal(fetched, 0);
 });
 
 // ------------------------------------------------------- pre_retrieval wiring

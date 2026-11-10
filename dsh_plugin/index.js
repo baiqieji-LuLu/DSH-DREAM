@@ -34,6 +34,7 @@ import {
   probeRuntime,
 } from "./runtime_env.js";
 import { PythonBridge } from "./bridge_process.js";
+import { normalizePayload, redactPayload } from "./config_bridge.js";
 import { registerMemoryTools } from "./memory_tools.js";
 import { registerPreRetrieval } from "./pre_retrieval.js";
 import { CloudRouter } from "./router_cloud.js";
@@ -357,186 +358,8 @@ export const Config = z.object({
     .volatile(),
 });
 
-/**
- * Read a Loader config field that may be a plain value or a volatile reference.
- * DSH delivers either form depending on whether the settings service is active,
- * so calling `.get()` unconditionally is not safe.
- */
-const current = (value) =>
-  value !== null && typeof value === "object" && typeof value.get === "function"
-    ? value.get()
-    : value;
-
-/** Normalize a raw Config or Settings descriptor value for the Python bridge. */
-function normalizePayload(raw, previous = null) {
-  const value = raw && typeof raw === "object" ? raw : {};
-  const provider = String(current(value.embedding_provider) ?? "local")
-    .trim()
-    .toLowerCase();
-  return {
-    enable_memory: Boolean(current(value.enable_memory) ?? true),
-    enable_auto_recall: Boolean(current(value.enable_auto_recall) ?? true),
-    // Preserve an explicit UI override, but never synthesize a default path:
-    // the backend resolves the per-user DSH data directory (and honors
-    // AGENT_MEMORY_RAG_PATH) when this field is blank.
-    rag_path: String(current(value.rag_path) ?? "").trim(),
-    python_path: String(current(value.python_path) ?? "").trim(),
-    hf_home_path: String(current(value.hf_home_path) ?? "").trim(),
-    max_window_tokens: Number(current(value.max_window_tokens) ?? 1500),
-    retrieval_top_k: Number(current(value.retrieval_top_k) ?? 5),
-    embedding_provider:
-      provider === "openai_compatible" ? "openai_compatible" : "local",
-    embedding_model: String(current(value.embedding_model) ?? "").trim(),
-    embedding_api_key: String(current(value.embedding_api_key) ?? "").trim(),
-    embedding_base_url: String(
-      current(value.embedding_base_url) ?? "",
-    ).trim(),
-    auto_rebuild_collection: Boolean(
-      current(value.auto_rebuild_collection) ?? true,
-    ),
-    holographic_mode: Boolean(current(value.holographic_mode) ?? false),
-    router: normalizeRouterPayload(value, previous),
-  };
-}
-
-/**
- * Assemble the nested `router` block from flat `router_*` form fields while
- * preserving any nested settings the settings form did not send.
- *
- * 中文说明：把扁平路由字段组装成嵌套配置；表单未提交的部分沿用已有值，
- * 避免保存普通设置时把路由配置清空。
- */
-function normalizeRouterPayload(value, previous) {
-  const previousRouter =
-    previous?.router && typeof previous.router === "object" ? previous.router : {};
-  const provided =
-    value.router && typeof value.router === "object" && current(value.router) !== null
-      ? current(value.router)
-      : null;
-  const nested = provided || previousRouter;
-  const nestedRegex =
-    nested.regex && typeof nested.regex === "object" ? nested.regex : {};
-  const nestedLocal =
-    nested.local && typeof nested.local === "object" ? nested.local : {};
-  const nestedCloud =
-    nested.cloud && typeof nested.cloud === "object" ? nested.cloud : {};
-  const nestedCache =
-    nested.cache && typeof nested.cache === "object" ? nested.cache : {};
-  const nestedCircuit =
-    nested.circuit && typeof nested.circuit === "object" ? nested.circuit : {};
-  const nestedAudit =
-    nested.audit && typeof nested.audit === "object" ? nested.audit : {};
-
-  const flatBoolean = (flatKey, fallback) => {
-    const raw = current(value[flatKey]);
-    if (raw === undefined || raw === null) return Boolean(fallback);
-    if (typeof raw === "string") {
-      const text = raw.trim().toLowerCase();
-      if (["1", "true", "yes", "on"].includes(text)) return true;
-      if (["0", "false", "no", "off"].includes(text)) return false;
-    }
-    return Boolean(raw);
-  };
-  const flatString = (flatKey, fallback) => {
-    const raw = current(value[flatKey]);
-    if (raw === undefined || raw === null) return fallback;
-    const text = String(raw).trim();
-    return text || fallback;
-  };
-  const flatNumber = (flatKey, fallback) => {
-    const raw = Number(current(value[flatKey]));
-    return Number.isFinite(raw) ? raw : fallback;
-  };
-
-  const activeProvider = flatString(
-    "router_cloud_provider",
-    String(nestedCloud.active ?? "").trim(),
-  );
-  const existingProviders =
-    nestedCloud.providers && typeof nestedCloud.providers === "object"
-      ? nestedCloud.providers
-      : {};
-  const providers = { ...existingProviders };
-  if (activeProvider) {
-    const base = { ...(providers[activeProvider] || {}) };
-    for (const [flatKey, target] of [
-      ["router_cloud_base_url", "base_url"],
-      ["router_cloud_path", "path"],
-      ["router_cloud_model", "model"],
-      ["router_cloud_api_key_env", "api_key_env"],
-    ]) {
-      const raw = current(value[flatKey]);
-      if (raw !== undefined && raw !== null && String(raw).trim() !== "") {
-        base[target] = String(raw).trim();
-      }
-    }
-    providers[activeProvider] = base;
-  }
-
-  return {
-    enabled: flatBoolean("router_enabled", nested.enabled ?? true),
-    mode: flatString("router_mode", String(nested.mode ?? "auto")),
-    budget_ms: flatNumber("router_budget_ms", Number(nested.budget_ms ?? 200)),
-    threshold: flatNumber("router_threshold", Number(nested.threshold ?? 0.55)),
-    uncertainty_band: flatNumber(
-      "router_uncertainty_band",
-      Number(nested.uncertainty_band ?? 0.1),
-    ),
-    timeout_policy: flatString(
-      "router_timeout_policy",
-      String(nested.timeout_policy ?? "retrieve"),
-    ),
-    error_policy: String(nested.error_policy ?? "fallback_regex"),
-    on_internal_error: String(nested.on_internal_error ?? "retrieve"),
-    shadow_mode: flatBoolean("router_shadow_mode", nested.shadow_mode ?? false),
-    regex: {
-      enabled: nestedRegex.enabled !== false,
-      default_decision:
-        nestedRegex.default_decision === "skip" ? "skip" : "retrieve",
-      explicit_fast_path: nestedRegex.explicit_fast_path === true,
-    },
-    local: {
-      backend: flatString(
-        "router_local_backend",
-        String(nestedLocal.backend ?? "bge-head"),
-      ),
-      hedge: nestedLocal.hedge !== false,
-      model_dir: String(nestedLocal.model_dir ?? "").trim(),
-      warmup_timeout_ms: Number(nestedLocal.warmup_timeout_ms ?? 30000),
-    },
-    cloud: {
-      enabled: flatBoolean("router_cloud_enabled", nestedCloud.enabled ?? false),
-      active: activeProvider,
-      budget_ms: Number(nestedCloud.budget_ms ?? 150),
-      providers,
-    },
-    cache: {
-      enabled: nestedCache.enabled !== false,
-      ttl_ms: Number(nestedCache.ttl_ms ?? 120000),
-      max_entries: Number(nestedCache.max_entries ?? 256),
-    },
-    circuit: {
-      failure_threshold: Number(nestedCircuit.failure_threshold ?? 3),
-      cooldown_ms: Number(nestedCircuit.cooldown_ms ?? 300000),
-    },
-    audit: {
-      enabled: nestedAudit.enabled !== false,
-      store_query: "hash",
-      max_bytes: Number(nestedAudit.max_bytes ?? 4194304),
-    },
-  };
-}
-
-/** Never write a bearer token into logs. */
-function redactPayload(payload) {
-  return {
-    ...payload,
-    embedding_api_key: payload.embedding_api_key ? "***" : "",
-  };
-}
-
 /** Read the authoritative live values and revision from the settings service. */
-function settingsDescriptor(settings) {
+function settingsDescriptor(settings, previous = null) {
   if (!settings || typeof settings.describe !== "function") return null;
   try {
     const forms = settings.describe();
@@ -551,7 +374,9 @@ function settingsDescriptor(settings) {
     });
     if (!entry || !entry.value || typeof entry.value !== "object") return null;
     return {
-      payload: normalizePayload(entry.value),
+      // The form may not render every router setting; `previous` keeps the
+      // advanced values (budget, threshold, cloud endpoint, circuit, audit).
+      payload: normalizePayload(entry.value, previous),
       revision: Number(entry.revision) || 0,
     };
   } catch (error) {
@@ -831,7 +656,7 @@ export function apply(ctx, config) {
     }
 
     const syncFromSettings = (settings, eventRevision) => {
-      const descriptor = settingsDescriptor(settings);
+      const descriptor = settingsDescriptor(settings, readBridgeFile(target));
       if (!descriptor) return false;
       if (
         eventRevision !== undefined &&
@@ -952,7 +777,10 @@ export function apply(ctx, config) {
     ctx.inject(["settings"], (child) => {
       child.effect(
         () => {
-          const initial = settingsDescriptor(child.settings);
+          const initial = settingsDescriptor(
+            child.settings,
+            readBridgeFile(target),
+          );
           if (initial) baselineRevision = initial.revision;
           diag(
             `settings injected; baselineRevision=${baselineRevision}; allowSync=${allowSync}`,
@@ -966,7 +794,10 @@ export function apply(ctx, config) {
                 String(ns).endsWith(`:${ENTRY_ID}`) ||
                 String(ns).endsWith(`/${ENTRY_ID}`)
               ) {
-                const descriptor = settingsDescriptor(child.settings);
+                const descriptor = settingsDescriptor(
+                  child.settings,
+                  readBridgeFile(target),
+                );
                 console.log(
                   "🔥 [Host] 收到设置更新事件",
                   ns,

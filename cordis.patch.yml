@@ -13,3 +13,13 @@
         embedding_base_url: ''
         auto_rebuild_collection: true
         holographic_mode: false
+        # RouterEngine defaults: smart intent cutoff on, built-in local judge,
+        # no external cloud model until the user fills one in.
+        router_enabled: true
+        router_mode: auto
+        router_cloud_enabled: false
+        router_cloud_provider: ''
+        router_cloud_base_url: ''
+        router_cloud_path: ''
+        router_cloud_model: ''
+        router_cloud_api_key_env: ''

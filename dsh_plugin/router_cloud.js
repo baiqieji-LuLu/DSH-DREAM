@@ -80,8 +80,10 @@ export const PROVIDER_PRESETS = Object.freeze({
     displayName: "Custom",
     dialect: "systemone",
     baseUrl: "",
-    path: "/v1/systemone",
-    model: "",
+    // Matches the settings-page placeholder: one endpoint URL plus an API-key
+    // env var is enough to reach an OpenAI-compatible / System One endpoint.
+    path: "/compatible-mode/v1/systemone",
+    model: "decision-model-preview",
     apiKeyEnv: "",
     budgetMs: 150,
   },
@@ -259,13 +261,25 @@ export class CloudRouter {
       (activeId && providers[activeId]) || providers[Object.keys(providers)[0]] || {};
     const preset = PROVIDER_PRESETS[activeId] || PROVIDER_PRESETS.custom;
     const config = rawProvider && typeof rawProvider === "object" ? rawProvider : {};
-    const baseUrl = String(config.base_url ?? config.baseUrl ?? preset.baseUrl ?? "").trim();
-    const path = String(config.path ?? preset.path ?? "").trim();
-    const model = String(config.model ?? preset.model ?? "").trim();
-    const apiKeyEnv = String(
-      config.api_key_env ?? config.apiKeyEnv ?? preset.apiKeyEnv ?? "",
-    ).trim();
-    const dialect = String(config.dialect ?? preset.dialect ?? "systemone").trim();
+    // An empty string means "not set" here, so a partially filled advanced form
+    // still falls back to the preset path/model instead of posting to a bare
+    // base URL.
+    const pickText = (...values) => {
+      for (const value of values) {
+        const text = String(value ?? "").trim();
+        if (text) return text;
+      }
+      return "";
+    };
+    const baseUrl = pickText(config.base_url, config.baseUrl, preset.baseUrl);
+    const path = pickText(config.path, preset.path);
+    const model = pickText(config.model, preset.model);
+    const apiKeyEnv = pickText(
+      config.api_key_env,
+      config.apiKeyEnv,
+      preset.apiKeyEnv,
+    );
+    const dialect = pickText(config.dialect, preset.dialect, "systemone");
     const budget = Number(config.budget_ms ?? cloud.budget_ms ?? preset.budgetMs ?? 150);
     return {
       providerId: activeId || preset.id,

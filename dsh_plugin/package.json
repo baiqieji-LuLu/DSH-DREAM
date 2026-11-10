@@ -21,6 +21,7 @@
     "holographic_events.js",
     "runtime_env.js",
     "bridge_process.js",
+    "config_bridge.js",
     "memory_tools.js",
     "pre_retrieval.js",
     "router_engine.js",

@@ -38,11 +38,11 @@ window.__ModuleLoader__.load({
         "Leave blank to use the DSH user directory; enter an absolute path to customize, or set AGENT_MEMORY_RAG_PATH to override.",
       pythonPath: 'Python interpreter path',
       pythonPathHint:
-        'Optional absolute path to a Python with chromadb and sentence-transformers. Leave blank to auto-detect an adjacent .venv or PATH, then restart DSH.',
+        '(Optional / advanced) Leave this blank — the plugin assembles its own isolated environment. Fill it in only if automatic setup failed, or you want to force a specific Python.',
       pythonPathPlaceholder: 'Auto-detect .venv or PATH',
       hfHome: 'Model cache directory',
       hfHomeHint:
-        'Optional writable directory for Hugging Face models. Leave blank to try the DSH profile, plugin, and working-directory .hf-cache locations.',
+        '(Optional) Leave blank to store models in your user directory. If your C: drive is full, point this at an empty folder on a D:/E: drive instead.',
       hfHomePlaceholder: 'Auto-detect a writable cache',
       runtimeCheck: 'Runtime check',
       runtimeChecking: 'Checking Python runtime…',
@@ -77,6 +77,40 @@ window.__ModuleLoader__.load({
       holographicHint:
         'When enabled, every turn writes the complete User and Assistant originals to the vector store, no matter what the conversation is about. Nothing is omitted.',
       holographicBadge: 'FORCE MEMORY',
+      routerTitle: 'Smart routing (Router)',
+      routerEnabled: 'Smart intent cutoff',
+      routerEnabledHint:
+        'When on, the AI first decides whether this topic needs to look through old memories. Small talk is answered directly, without wasting time on a database lookup.',
+      routerMode: 'Decision priority',
+      routerModeHint:
+        'The default zero-config local judge takes about 5 ms and downloads nothing new. When a topic is ambiguous it lets retrieval happen: better to look too often than to forget.',
+      routerModeAuto: 'auto (default)',
+      routerModeCloud: 'cloud (prefer cloud)',
+      routerModeLocal: 'local (fast local only)',
+      routerModeRegex: 'regex (keywords only)',
+      routerAdvancedTitle: 'Advanced: bring your own decision model (optional)',
+      routerCloudBadge: 'ADVANCED',
+      routerAdvancedNotice:
+        'Regular users: leave this empty! Empty means the built-in fast local judge is used. Advanced users can connect an external cloud model (e.g. Alibaba Bailian, Jev) here to improve accuracy on complex wording.',
+      routerCloudBaseUrl: 'Cloud endpoint URL',
+      routerCloudBaseUrlHint:
+        'Full endpoint URL including https://. Leave blank to keep the built-in fast local judge.',
+      routerCloudBaseUrlPlaceholder:
+        'e.g. https://ws-xxx.cn-beijing.maas.aliyuncs.com',
+      routerCloudPath: 'Request path',
+      routerCloudPathHint: 'Leave blank to use the provider default path.',
+      routerCloudPathPlaceholder: 'Default /compatible-mode/v1/systemone',
+      routerCloudModel: 'Cloud model name',
+      routerCloudModelHint:
+        'Leave blank to use the preset model for this provider.',
+      routerCloudModelPlaceholder: 'e.g. decision-model-preview or jev-latest',
+      routerCloudApiKeyEnv: 'API key env var name (keeps the key safe)',
+      routerCloudApiKeyEnvHint:
+        'Enter only the environment-variable name, never the key itself. Put the key in your system environment variables.',
+      routerCloudApiKeyEnvPlaceholder:
+        'e.g. DASHSCOPE_API_KEY (the env var you configured on this machine)',
+      invalidRouterBaseUrl:
+        'The cloud endpoint URL must start with http:// or https://, or be left blank.',
       providerLocal: 'local (bundled Chinese model)',
       providerCloud: 'openai_compatible (cloud API)',
       invalidApiKey: 'Cloud embedding requires an API key.',
@@ -116,11 +150,11 @@ window.__ModuleLoader__.load({
         '留空则默认存储在 DSH 用户目录下；如需自定义，请填入绝对路径，或通过环境变量 AGENT_MEMORY_RAG_PATH 覆盖。',
       pythonPath: 'Python 解释器路径',
       pythonPathHint:
-        '可选。填写已安装 chromadb 与 sentence-transformers 的 Python 绝对路径；留空则自动查找相邻 .venv 或系统 PATH，修改后需重启 DSH。',
+        '（选填/进阶向）一般留空即可！插件会自动帮你装配隔离环境。仅当自动装配失败，或你想强制指定某个 Python 时再填写。',
       pythonPathPlaceholder: '自动查找 .venv 或 PATH',
       hfHome: '模型缓存目录',
       hfHomeHint:
-        '可选。填写可写的 Hugging Face 模型缓存目录；留空则依次尝试 DSH Profile、插件目录与当前工作目录下的 .hf-cache。',
+        '（选填）留空则自动存放到系统用户目录。如果你 C 盘爆满，可以在这里填个 D 盘或 E 盘的空文件夹路径。',
       hfHomePlaceholder: '自动寻找可写缓存目录',
       runtimeCheck: '运行环境检查',
       runtimeChecking: '正在检查 Python 运行环境…',
@@ -153,6 +187,39 @@ window.__ModuleLoader__.load({
       holographicHint:
         '开启后，无论对话内容如何，每轮对话的 User 和 Assistant 原话都会被强制写入向量库，绝不遗漏。',
       holographicBadge: '强制记忆',
+      routerTitle: '智能路由（Router）',
+      routerEnabled: '智能意图截断',
+      routerEnabledHint:
+        '开启后，AI 会先判断话题是否需要翻阅旧记忆。闲聊直接回复，不浪费时间查库。',
+      routerMode: '判断优先级',
+      routerModeHint:
+        '默认采用零配置的本地极速判断（约 5 毫秒，不需下载新模型）。如果遇到拿不准的话题，默认放行去查库，宁可多查也不失忆。',
+      routerModeAuto: 'auto（自动-默认）',
+      routerModeCloud: 'cloud（优先云端）',
+      routerModeLocal: 'local（仅本地极速）',
+      routerModeRegex: 'regex（仅关键词规则）',
+      routerAdvancedTitle: '高级：自定义外接判断模型（选填）',
+      routerCloudBadge: '进阶',
+      routerAdvancedNotice:
+        '普通用户请留空！留空即代表使用内置极速本地判断。如果你是进阶用户，可在此接入外部云端模型（如阿里百炼、Jev）来提升复杂语境的判断准确率。',
+      routerCloudBaseUrl: '云端接口地址',
+      routerCloudBaseUrlHint:
+        '填写完整的接口地址（含 https://）；留空则继续使用内置的本地极速判断。',
+      routerCloudBaseUrlPlaceholder:
+        '例如 https://ws-xxx.cn-beijing.maas.aliyuncs.com',
+      routerCloudPath: '请求路径',
+      routerCloudPathHint: '留空则使用该服务商的默认路径。',
+      routerCloudPathPlaceholder: '默认 /compatible-mode/v1/systemone',
+      routerCloudModel: '云端模型名称',
+      routerCloudModelHint: '留空则使用该服务商预设的模型名。',
+      routerCloudModelPlaceholder: '例如 decision-model-preview 或 jev-latest',
+      routerCloudApiKeyEnv: 'API Key 环境变量名（保护密钥）',
+      routerCloudApiKeyEnvHint:
+        '只填环境变量的名字，不要填密钥本身；密钥请配置在系统环境变量里。',
+      routerCloudApiKeyEnvPlaceholder:
+        '例如 DASHSCOPE_API_KEY（填入你在电脑里配的环境变量名）',
+      invalidRouterBaseUrl:
+        '云端接口地址必须以 http:// 或 https:// 开头，或直接留空。',
       providerLocal: 'local（内置中文模型）',
       providerCloud: 'openai_compatible（云端 API）',
       invalidApiKey: '云端 Embedding 必须填写 API Key。',
@@ -381,6 +448,56 @@ window.__ModuleLoader__.load({
         accent-color: var(--dsw-alias-state-business-primary);
       }
       .am-muted { color: var(--dsw-alias-label-tertiary); }
+      .am-advanced {
+        margin: 0 0 8px;
+        padding: 12px 14px;
+        border: 0.5px dashed var(--dsw-alias-border-l3);
+        border-radius: var(--dsw-radius-xl, 12px);
+        background: color-mix(
+          in srgb,
+          var(--dsw-alias-bg-base) 92%,
+          var(--dsw-alias-label-primary)
+        );
+      }
+      .am-advanced-summary {
+        display: flex;
+        align-items: center;
+        gap: 8px;
+        cursor: pointer;
+        color: var(--dsw-alias-label-primary);
+        font-weight: 500;
+        list-style: none;
+      }
+      .am-advanced-summary::-webkit-details-marker { display: none; }
+      .am-advanced-summary::before {
+        content: '▸';
+        color: var(--dsw-alias-label-tertiary);
+        font-size: 11px;
+        transition: transform 0.16s ease;
+      }
+      .am-advanced[open] .am-advanced-summary::before {
+        transform: rotate(90deg);
+      }
+      .am-advanced-badge {
+        padding: 1px 6px;
+        border-radius: 999px;
+        border: 0.5px solid var(--dsw-alias-border-l3);
+        color: var(--dsw-alias-label-secondary);
+        font-size: 10px;
+        font-weight: 600;
+        letter-spacing: 0.04em;
+      }
+      .am-advanced-notice {
+        margin: 10px 0 6px;
+        padding: 8px 10px;
+        border-radius: var(--dsw-radius-md, 8px);
+        background: var(--dsw-alias-settings-card-fill, var(--dsw-alias-bg-base));
+        color: var(--dsw-alias-label-secondary);
+        font-size: 12px;
+        line-height: 18px;
+      }
+      .am-advanced-card { margin-top: 6px; }
+      .am-advanced-card .am-row { padding: 12px 14px; }
       @media (max-width: 560px) {
         .am-row {
           align-items: flex-start;
@@ -393,8 +510,41 @@ window.__ModuleLoader__.load({
       }
     `;
 
+    function normalizeRouterMode(value) {
+      const text = String(value ?? 'auto')
+        .trim()
+        .toLowerCase();
+      return ['auto', 'cloud', 'local', 'regex'].includes(text) ? text : 'auto';
+    }
+
     function asDraft(value) {
       const current = value && typeof value === 'object' ? value : {};
+      const router =
+        current.router && typeof current.router === 'object'
+          ? current.router
+          : {};
+      const cloud =
+        router.cloud && typeof router.cloud === 'object' ? router.cloud : {};
+      const activeProvider = String(cloud.active ?? '');
+      const providerConfig =
+        activeProvider &&
+        cloud.providers &&
+        typeof cloud.providers === 'object' &&
+        cloud.providers[activeProvider] &&
+        typeof cloud.providers[activeProvider] === 'object'
+          ? cloud.providers[activeProvider]
+          : {};
+      // The DSH settings form stores flat router_* fields; the custom page and
+      // the bridge file use the nested block. Accept both.
+      const flat = (key, fallback) => {
+        if (
+          Object.prototype.hasOwnProperty.call(current, key) &&
+          current[key] !== undefined
+        ) {
+          return current[key];
+        }
+        return fallback;
+      };
       return {
         enable: current.enable_memory !== false,
         autoRecall: current.enable_auto_recall !== false,
@@ -412,6 +562,21 @@ window.__ModuleLoader__.load({
         embeddingBaseUrl: String(current.embedding_base_url ?? ''),
         autoRebuild: current.auto_rebuild_collection !== false,
         holographic: current.holographic_mode === true,
+        routerEnabled: flat('router_enabled', router.enabled) !== false,
+        routerMode: normalizeRouterMode(flat('router_mode', router.mode)),
+        routerCloudBaseUrl: String(
+          flat('router_cloud_base_url', providerConfig.base_url ?? '') ?? '',
+        ),
+        routerCloudPath: String(
+          flat('router_cloud_path', providerConfig.path ?? '') ?? '',
+        ),
+        routerCloudModel: String(
+          flat('router_cloud_model', providerConfig.model ?? '') ?? '',
+        ),
+        routerCloudApiKeyEnv: String(
+          flat('router_cloud_api_key_env', providerConfig.api_key_env ?? '') ??
+            '',
+        ),
       };
     }
 
@@ -439,6 +604,10 @@ window.__ModuleLoader__.load({
       ) {
         return { error: 'invalidBaseUrl' };
       }
+      const routerBaseUrl = String(draft.routerCloudBaseUrl || '').trim();
+      if (routerBaseUrl && !/^https?:\/\//i.test(routerBaseUrl)) {
+        return { error: 'invalidRouterBaseUrl' };
+      }
       return {
         max,
         top,
@@ -449,6 +618,15 @@ window.__ModuleLoader__.load({
         autoRebuild: Boolean(draft.autoRebuild),
         autoRecall: Boolean(draft.autoRecall),
         holographic: Boolean(draft.holographic),
+        routerEnabled: Boolean(draft.routerEnabled),
+        routerMode: normalizeRouterMode(draft.routerMode),
+        routerBaseUrl,
+        routerPath: String(draft.routerCloudPath || '').trim(),
+        routerModel: String(draft.routerCloudModel || '').trim(),
+        routerApiKeyEnv: String(draft.routerCloudApiKeyEnv || '').trim(),
+        // A filled endpoint is the user's opt-in for the external judge;
+        // leaving it blank means "use the built-in local judge".
+        routerCloudEnabled: Boolean(routerBaseUrl),
       };
     }
 
@@ -491,6 +669,10 @@ window.__ModuleLoader__.load({
       const [saving, setSaving] = React.useState(false);
       const [saved, setSaved] = React.useState(false);
       const [error, setError] = React.useState('');
+      // Open the advanced cloud block automatically when a cloud endpoint is
+      // already configured, so an existing setup is never hidden.
+      const [advancedOpen, setAdvancedOpen] = React.useState(false);
+      const advancedInitialized = React.useRef(false);
       const [runtime, setRuntime] = React.useState({
         state: 'checking',
         missing: [],
@@ -543,6 +725,14 @@ window.__ModuleLoader__.load({
           setDraft(asDraft(snapshot.value));
         }
       }, [snapshot.status, snapshot.revision, dirty]);
+
+      React.useEffect(() => {
+        if (!draft || advancedInitialized.current) return;
+        advancedInitialized.current = true;
+        if (String(draft.routerCloudBaseUrl || '').trim()) {
+          setAdvancedOpen(true);
+        }
+      }, [draft]);
 
       React.useEffect(() => {
         if (!saved) return undefined;
@@ -656,6 +846,17 @@ window.__ModuleLoader__.load({
           embedding_base_url: parsed.baseUrl,
           auto_rebuild_collection: parsed.autoRebuild,
           holographic_mode: parsed.holographic,
+          // Router fields stay flat here; the Host assembles the nested
+          // `router` block and preserves any advanced setting the page did
+          // not render (budget, threshold, circuit, audit).
+          router_enabled: parsed.routerEnabled,
+          router_mode: parsed.routerMode,
+          router_cloud_enabled: parsed.routerCloudEnabled,
+          router_cloud_provider: parsed.routerCloudEnabled ? 'custom' : '',
+          router_cloud_base_url: parsed.routerBaseUrl,
+          router_cloud_path: parsed.routerPath,
+          router_cloud_model: parsed.routerModel,
+          router_cloud_api_key_env: parsed.routerApiKeyEnv,
         };
         const bridgePromise = pushBridge(bridgePayload);
         try {
@@ -725,6 +926,46 @@ window.__ModuleLoader__.load({
                 op: 'set',
                 path: ['holographic_mode'],
                 value: parsed.holographic,
+              },
+              {
+                op: 'set',
+                path: ['router_enabled'],
+                value: parsed.routerEnabled,
+              },
+              {
+                op: 'set',
+                path: ['router_mode'],
+                value: parsed.routerMode,
+              },
+              {
+                op: 'set',
+                path: ['router_cloud_enabled'],
+                value: parsed.routerCloudEnabled,
+              },
+              {
+                op: 'set',
+                path: ['router_cloud_provider'],
+                value: parsed.routerCloudEnabled ? 'custom' : '',
+              },
+              {
+                op: 'set',
+                path: ['router_cloud_base_url'],
+                value: parsed.routerBaseUrl,
+              },
+              {
+                op: 'set',
+                path: ['router_cloud_path'],
+                value: parsed.routerPath,
+              },
+              {
+                op: 'set',
+                path: ['router_cloud_model'],
+                value: parsed.routerModel,
+              },
+              {
+                op: 'set',
+                path: ['router_cloud_api_key_env'],
+                value: parsed.routerApiKeyEnv,
               },
             ],
             snapshot.revision,
@@ -956,6 +1197,187 @@ window.__ModuleLoader__.load({
               { className: 'am-copy' },
               h('div', { className: 'am-label' }, tr('runtimeCheck')),
               h('div', { className: 'am-hint' }, runtimeText),
+            ),
+          ),
+        ),
+        h('div', { className: 'am-subhead' }, tr('routerTitle')),
+        h(
+          'div',
+          { className: 'am-card' },
+          h(
+            'div',
+            { className: 'am-row' },
+            h(
+              'div',
+              { className: 'am-copy' },
+              h('div', { className: 'am-label' }, tr('routerEnabled')),
+              h('div', { className: 'am-hint' }, tr('routerEnabledHint')),
+            ),
+            h(Toggle, {
+              checked: draft.routerEnabled,
+              disabled,
+              label: tr('routerEnabled'),
+              onChange: (value) => edit({ routerEnabled: value }),
+            }),
+          ),
+          h(
+            'div',
+            { className: 'am-row am-row-last' },
+            h(
+              'div',
+              { className: 'am-copy' },
+              h(
+                'label',
+                { className: 'am-label', htmlFor: 'am-router-mode' },
+                tr('routerMode'),
+              ),
+              h('div', { className: 'am-hint' }, tr('routerModeHint')),
+            ),
+            h(
+              'select',
+              {
+                id: 'am-router-mode',
+                className: 'am-input am-select',
+                value: draft.routerMode,
+                disabled: disabled || !draft.routerEnabled,
+                onChange: (event) =>
+                  edit({ routerMode: event.target.value }),
+              },
+              h('option', { value: 'auto' }, tr('routerModeAuto')),
+              h('option', { value: 'cloud' }, tr('routerModeCloud')),
+              h('option', { value: 'local' }, tr('routerModeLocal')),
+              h('option', { value: 'regex' }, tr('routerModeRegex')),
+            ),
+          ),
+        ),
+        h(
+          'details',
+          {
+            className: 'am-advanced',
+            open: advancedOpen,
+            onToggle: (event) => setAdvancedOpen(event.currentTarget.open),
+          },
+          h(
+            'summary',
+            { className: 'am-advanced-summary' },
+            h('span', null, tr('routerAdvancedTitle')),
+            h(
+              'span',
+              { className: 'am-advanced-badge' },
+              tr('routerCloudBadge'),
+            ),
+          ),
+          h(
+            'p',
+            { className: 'am-advanced-notice' },
+            tr('routerAdvancedNotice'),
+          ),
+          h(
+            'div',
+            { className: 'am-card am-advanced-card' },
+            h(
+              'div',
+              { className: 'am-row' },
+              h(
+                'div',
+                { className: 'am-copy' },
+                h(
+                  'label',
+                  { className: 'am-label', htmlFor: 'am-router-cloud-url' },
+                  tr('routerCloudBaseUrl'),
+                ),
+                h('div', { className: 'am-hint' }, tr('routerCloudBaseUrlHint')),
+              ),
+              h('input', {
+                id: 'am-router-cloud-url',
+                className: 'am-input',
+                type: 'text',
+                value: draft.routerCloudBaseUrl,
+                placeholder: tr('routerCloudBaseUrlPlaceholder'),
+                disabled,
+                spellCheck: false,
+                onChange: (event) =>
+                  edit({ routerCloudBaseUrl: event.target.value }),
+              }),
+            ),
+            h(
+              'div',
+              { className: 'am-row' },
+              h(
+                'div',
+                { className: 'am-copy' },
+                h(
+                  'label',
+                  { className: 'am-label', htmlFor: 'am-router-cloud-path' },
+                  tr('routerCloudPath'),
+                ),
+                h('div', { className: 'am-hint' }, tr('routerCloudPathHint')),
+              ),
+              h('input', {
+                id: 'am-router-cloud-path',
+                className: 'am-input',
+                type: 'text',
+                value: draft.routerCloudPath,
+                placeholder: tr('routerCloudPathPlaceholder'),
+                disabled,
+                spellCheck: false,
+                onChange: (event) =>
+                  edit({ routerCloudPath: event.target.value }),
+              }),
+            ),
+            h(
+              'div',
+              { className: 'am-row' },
+              h(
+                'div',
+                { className: 'am-copy' },
+                h(
+                  'label',
+                  { className: 'am-label', htmlFor: 'am-router-cloud-model' },
+                  tr('routerCloudModel'),
+                ),
+                h('div', { className: 'am-hint' }, tr('routerCloudModelHint')),
+              ),
+              h('input', {
+                id: 'am-router-cloud-model',
+                className: 'am-input',
+                type: 'text',
+                value: draft.routerCloudModel,
+                placeholder: tr('routerCloudModelPlaceholder'),
+                disabled,
+                spellCheck: false,
+                onChange: (event) =>
+                  edit({ routerCloudModel: event.target.value }),
+              }),
+            ),
+            h(
+              'div',
+              { className: 'am-row am-row-last' },
+              h(
+                'div',
+                { className: 'am-copy' },
+                h(
+                  'label',
+                  {
+                    className: 'am-label',
+                    htmlFor: 'am-router-cloud-key-env',
+                  },
+                  tr('routerCloudApiKeyEnv'),
+                ),
+                h('div', { className: 'am-hint' }, tr('routerCloudApiKeyEnvHint')),
+              ),
+              h('input', {
+                id: 'am-router-cloud-key-env',
+                className: 'am-input',
+                type: 'text',
+                value: draft.routerCloudApiKeyEnv,
+                placeholder: tr('routerCloudApiKeyEnvPlaceholder'),
+                disabled,
+                spellCheck: false,
+                autoComplete: 'off',
+                onChange: (event) =>
+                  edit({ routerCloudApiKeyEnv: event.target.value }),
+              }),
             ),
           ),
         ),
