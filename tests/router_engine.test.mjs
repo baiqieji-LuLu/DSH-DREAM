@@ -33,11 +33,18 @@ import {
   HARD_SKIP,
   NEUTRAL,
   RULES_VERSION,
+  WEAK,
   guard,
   normalizeQuery,
 } from "../dsh_plugin/router_regex.js";
 import { CloudRouter, CloudRouterError } from "../dsh_plugin/router_cloud.js";
-import { registerPreRetrieval } from "../dsh_plugin/pre_retrieval.js";
+import { LocalRouterClient } from "../dsh_plugin/router_local.js";
+import {
+  createMemoryHint,
+  recallDecision,
+  registerPreRetrieval,
+  topSimilarity,
+} from "../dsh_plugin/pre_retrieval.js";
 
 const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 const never = () => new Promise(() => {});
@@ -191,8 +198,26 @@ test("regex guard hard-skips greetings, commands, suppression, and empty input",
   assert.equal(guard("别翻旧账，我们聊点新的").kind, HARD_SKIP);
   assert.equal(guard("忽略记忆继续回答").kind, HARD_SKIP);
   assert.equal(guard("上次我们说的那个方案").kind, EXPLICIT);
+  // Weak cues must not decide anything by themselves: "现在", "那个东西",
+  // bare "记得", "变化" are handed to the local BGE head.
+  assert.equal(guard("现在几点了").kind, WEAK);
+  assert.equal(guard("那个东西怎么样了").kind, WEAK);
+  assert.equal(guard("记得带伞").kind, WEAK);
+  assert.equal(guard("这个方案有什么变化").kind, WEAK);
+  assert.equal(guard("你还记得我的偏好吗").kind, EXPLICIT);
   assert.equal(guard("帮我写一个快速排序函数").kind, NEUTRAL);
   assert.equal(normalizeQuery("  你  好  "), "你 好");
+});
+
+test("weak cues go to the local judge instead of being hard-retrieved", async () => {
+  const local = fakeLocal({
+    impl: () => localRoute({ decision: "skip", probabilityRetrieve: 0.03 }),
+  });
+  const engine = makeEngine({ config: routerConfig(), local });
+  const result = await engine.route({ query: "现在几点了？那个东西怎么样了" });
+  assert.equal(local.calls.length, 1);
+  assert.equal(result.source, "local");
+  assert.equal(result.decision, "skip");
 });
 
 test("engine skips a greeting without touching any backend", async () => {
@@ -490,6 +515,55 @@ test("engine warmup creates the audit file and the first route appends hashed JS
     const after = await engine.status();
     assert.equal(after.audit.writes, 1);
     assert.equal(after.audit.lastError, null);
+    rmSync(dir, { recursive: true, force: true });
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("hard-skip guard decisions are audited too", async () => {
+  const dir = auditDir("skip");
+  const file = join(dir, "router.jsonl");
+  try {
+    const engine = createRouterEngine({
+      getConfig: () => ({
+        router: routerConfig({
+          audit: { enabled: true, store_query: "hash" },
+        }),
+      }),
+      auditPath: file,
+      diag: () => {},
+    });
+    await engine.warmup();
+    const cases = [
+      ["你好", "greeting"],
+      ["/clear", "command"],
+      ["别翻旧账", "suppression"],
+      ["   ", "empty"],
+    ];
+    for (const [query, reason] of cases) {
+      const result = await engine.route({ query });
+      assert.equal(result.decision, "skip");
+      assert.equal(result.source, "regex");
+      assert.equal(result.reason, reason);
+    }
+    await engine._audit.flush();
+    const records = readFileSync(file, "utf8")
+      .trim()
+      .split("\n")
+      .map((line) => JSON.parse(line));
+    assert.equal(records.length, 4);
+    assert.deepEqual(
+      records.map((record) => record.reason),
+      ["greeting", "command", "suppression", "empty"],
+    );
+    for (const record of records) {
+      assert.equal(record.decision, "skip");
+      assert.equal(record.source, "regex");
+      assert.equal(record.probability, 0);
+      assert.equal(record.query, undefined);
+      assert.match(record.query_hash, /^[0-9a-f]{64}$/);
+    }
     rmSync(dir, { recursive: true, force: true });
   } finally {
     rmSync(dir, { recursive: true, force: true });
@@ -844,6 +918,71 @@ test("missing credentials keep the cloud layer out", async () => {
   assert.equal(fetched, 0);
 });
 
+// ------------------------------------------------------------- local client
+
+test("local client keeps retrying while warming and adopts ready", async () => {
+  const responses = [
+    { ok: false, code: "LOCAL_NOT_READY", state: "warming" },
+    {
+      ok: true,
+      backend: "bge-head",
+      model_id: "m:head:v1",
+      probability: 0.91,
+      decision: "retrieve",
+      confidence: 0.91,
+      uncertain: false,
+      threshold: 0.55,
+      uncertainty_band: 0.1,
+      latency_ms: 2.0,
+    },
+  ];
+  const bridge = {
+    isBusy: () => false,
+    routeQuery: async () => responses.shift(),
+    routerStatus: async () => ({ ok: true, ready: false, state: "warming" }),
+  };
+  const client = new LocalRouterClient({
+    bridge,
+    getConfig: () => ({ router: { local: { backend: "bge-head" } } }),
+    diag: () => {},
+  });
+  assert.equal(client.isAvailable(), true);
+  await assert.rejects(
+    client.route({ query: "上次那个方案" }, { deadlineMs: 100 }),
+    (error) => error.code === "LOCAL_NOT_READY",
+  );
+  // A warming backend must stay eligible: the old cached-ready gate pinned the
+  // router to regex forever after one cold turn.
+  assert.equal(client.isAvailable(), true);
+  assert.equal(client.ready, false);
+  const result = await client.route(
+    { query: "上次那个方案" },
+    { deadlineMs: 100 },
+  );
+  assert.equal(result.decision, "retrieve");
+  assert.equal(client.ready, true);
+  assert.equal(client.state, "ready");
+});
+
+test("local client latches off only on a model mismatch", async () => {
+  const bridge = {
+    isBusy: () => false,
+    routeQuery: async () => ({ ok: false, code: "LOCAL_MODEL_MISMATCH" }),
+    routerStatus: async () => ({ ok: true, ready: false, state: "warming" }),
+  };
+  const client = new LocalRouterClient({
+    bridge,
+    getConfig: () => ({ router: { local: { backend: "bge-head" } } }),
+    diag: () => {},
+  });
+  await assert.rejects(
+    client.route({ query: "x" }, { deadlineMs: 100 }),
+    (error) => error.code === "LOCAL_MODEL_MISMATCH",
+  );
+  assert.equal(client.isAvailable(), false);
+  assert.equal(client.state, "failed");
+});
+
 // ------------------------------------------------------- pre_retrieval wiring
 
 function fakeCtx() {
@@ -861,7 +1000,7 @@ function fakeCtx() {
   };
 }
 
-function hintResult(text = "remembered fact") {
+function hintResult(text = "remembered fact", overrides = {}) {
   return {
     ok: true,
     result: {
@@ -871,6 +1010,7 @@ function hintResult(text = "remembered fact") {
           source_type: "user_message",
           similarity: 0.9,
           metadata: { timestamp_ms: Date.now() },
+          ...overrides,
         },
       ],
     },
@@ -907,6 +1047,78 @@ function registerRouter({ config, router, queryMemory, calls }) {
   });
   return ctx.handlers["agent/pre-step"];
 }
+
+test("recall gate accepts fused hybrids and keyword hits", () => {
+  const hybrid = recallDecision([
+    { similarity: 0.59, retrieval_source: "hybrid", rrf_score: 0.03 },
+  ]);
+  assert.equal(hybrid.inject, true);
+  assert.equal(hybrid.reason, "hybrid");
+
+  const vectorLow = recallDecision([
+    { similarity: 0.55, retrieval_source: "vector", rrf_score: 0.01 },
+  ]);
+  assert.equal(vectorLow.inject, false);
+  assert.equal(vectorLow.reason, "below_threshold");
+
+  const keyword = recallDecision([
+    { similarity: null, retrieval_source: "bm25", rrf_score: 0.016 },
+  ]);
+  assert.equal(keyword.inject, true);
+  assert.equal(keyword.reason, "keyword");
+
+  const anyHit = recallDecision([
+    { similarity: 0.3, retrieval_source: "hybrid", rrf_score: 0.03 },
+    { similarity: 0.7, retrieval_source: "vector", rrf_score: 0.01 },
+  ]);
+  assert.equal(anyHit.inject, true);
+  assert.equal(anyHit.reason, "vector_any_hit");
+
+  assert.equal(
+    topSimilarity([{ similarity: 0.3 }, { distance: 0.2 }]).toFixed(2),
+    "0.80",
+  );
+  assert.equal(recallDecision([]).reason, "no_hits");
+});
+
+test("memory hint tells the model to trust confirmed facts", () => {
+  const hint = createMemoryHint({
+    results: [
+      {
+        content: "我的东山精密成本是92元，浇水闹钟已取消",
+        source_type: "user_message",
+        metadata: { timestamp_ms: Date.UTC(2026, 10, 10) },
+      },
+    ],
+  });
+  assert.ok(hint.includes("<memory-hint>"));
+  assert.ok(hint.includes("优先直接使用"));
+  assert.ok(hint.includes("不要为了确认这些事实去读取文件"));
+  assert.ok(hint.includes("浇水闹钟已取消"));
+});
+
+test("integration: a hybrid 0.59 recall still injects a hint", async () => {
+  const calls = [];
+  const handler = registerRouter({
+    config: { enable_auto_recall: true, router: { enabled: true } },
+    router: {
+      route: async () => ({ decision: "retrieve", source: "local", shadow: false }),
+    },
+    queryMemory: () =>
+      hintResult("我的东山精密成本是92元，浇水闹钟已取消", {
+        similarity: 0.59,
+        retrieval_source: "hybrid",
+        rrf_score: 0.0328,
+      }),
+    calls,
+  });
+  const decision = await preStep(handler, "浇水闹钟取消了吗");
+  assert.equal(calls.length, 1);
+  assert.equal(decision.messages.length, 2);
+  assert.ok(
+    decision.messages[0].content[0].text.includes("优先直接使用"),
+  );
+});
 
 test("router.enabled=false restores the legacy behaviour", async () => {
   const calls = [];

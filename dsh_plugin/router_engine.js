@@ -705,6 +705,9 @@ export class RouterEngine {
         ? this._regexFor(config).guard(query)
         : { kind: "neutral" };
       if (guard.kind === "hard_skip") {
+        // Audit before returning: a skip is a routing decision too. Operators
+        // must be able to see what the guard filtered out, not only what it
+        // let through.
         return this._finish(
           { decision: "skip", source: SOURCE_REGEX, reason: guard.reason, probabilityRetrieve: 0, confidence: 1, uncertain: false },
           context,
@@ -902,6 +905,16 @@ export class RouterEngine {
       config = this._config();
     } catch {
       config = normalizeRouterConfig({});
+    }
+    // Refresh local readiness instead of trusting a cached flag: the Python
+    // side warms in a background thread, and an operator reading this endpoint
+    // must see the real state.
+    if (this.local && typeof this.local.status === "function") {
+      try {
+        await this.local.status(200);
+      } catch {
+        // Status is diagnostic; a failure must not break the payload.
+      }
     }
     const cloudInfo = this._cloudStatus(config);
     const localInfo = this._localStatus(config);
@@ -1288,7 +1301,7 @@ export class RouterEngine {
         query: context.query,
         sessionId: context.sessionId,
         turn: context.turn,
-        localReady: this._localAvailable(config),
+        localReady: this.local?.ready === true,
         cloudCircuit: this._circuit.state,
       });
     }

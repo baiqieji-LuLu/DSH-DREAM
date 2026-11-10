@@ -2,25 +2,25 @@
  * Regex guard and last-resort arbiter for the v0.4.0 RouterEngine.
  *
  * Regex is fast and deterministic, but it is not a classifier: it only
- * recognises explicit textual cues.  It has three jobs:
+ * recognises textual cues.  It has three jobs:
  *
  * 1. hard skip: empty input, greetings, slash commands, suppression phrases;
- * 2. optional explicit fast path: "上次", "还记得", "previously", … can bypass
- *    the models when `regex.explicit_fast_path=true` (default off, so cloud /
- *    local keep decision authority);
- * 3. last resort: when every model is unavailable or abstains, the default
- *    decision is `retrieve` ("模糊即查": better to over-retrieve than to
- *    forget).
+ * 2. strong explicit cues ("上次", "还记得", "previously", …): the only cues
+ *    allowed to bypass the models when `regex.explicit_fast_path=true`;
+ * 3. weak cues ("现在", "那个东西", "记得", "变化", …): **never** decide on
+ *    their own.  They are handed to the local BGE head so semantics, not a
+ *    keyword list, decides; regex only remains the final fallback.
  *
  * The engine only ever consumes `decision` from this module; it never asks the
  * regex layer to explain or to write prompt text.
  */
 
 /** Rule-set version recorded in audit records; bump on behaviour changes. */
-export const RULES_VERSION = 1;
+export const RULES_VERSION = 2;
 
 export const HARD_SKIP = "hard_skip";
 export const EXPLICIT = "explicit";
+export const WEAK = "weak";
 export const NEUTRAL = "neutral";
 
 const GREETINGS = new Set([
@@ -55,8 +55,11 @@ const SUPPRESSION_PATTERNS = [
   /(?:don'?t|do not)\s+(?:recall|mention)\s+(?:the\s+)?(?:past|history)/iu,
 ];
 
-/** Explicit memory cues: hints, never proof. */
-const EXPLICIT_PATTERNS = [
+/**
+ * Strong explicit memory cues: the only patterns allowed to bypass the local /
+ * cloud judge (and only when `explicit_fast_path=true`).
+ */
+const STRONG_PATTERNS = [
   /上次/u,
   /上回/u,
   /以前/u,
@@ -67,13 +70,8 @@ const EXPLICIT_PATTERNS = [
   /那天/u,
   /后来/u,
   /还记得/u,
-  /记得/u,
   /说过/u,
   /提过/u,
-  /历史/u,
-  /时间线/u,
-  /过程/u,
-  /变化/u,
   /最早/u,
   /第一次/u,
   /最后一次/u,
@@ -82,7 +80,29 @@ const EXPLICIT_PATTERNS = [
   /\bused\s+to\b/iu,
   /\bremember\b/iu,
   /\bback\s+then\b/iu,
+];
+
+/**
+ * Weak cues: hints that the turn *may* need memory, but not proof.  They must
+ * never short-circuit the local BGE head; a lexical match like "现在" or
+ * "那个东西" is exactly what a semantic model is for.
+ */
+const WEAK_PATTERNS = [
+  /记得/u,
+  /历史/u,
+  /时间线/u,
+  /过程/u,
+  /变化/u,
   /\bhistory\b/iu,
+  /现在/u,
+  /刚刚/u,
+  /刚才/u,
+  /最近/u,
+  /那个/u,
+  /这个/u,
+  /今天/u,
+  /昨天/u,
+  /明天/u,
 ];
 
 const PUNCTUATION_ONLY =
@@ -138,9 +158,21 @@ export function guard(query) {
       return { kind: HARD_SKIP, decision: "skip", reason: "suppression" };
     }
   }
-  for (const pattern of EXPLICIT_PATTERNS) {
+  for (const pattern of STRONG_PATTERNS) {
     if (pattern.test(text)) {
-      return { kind: EXPLICIT, decision: "retrieve", reason: "explicit_cue" };
+      return {
+        kind: EXPLICIT,
+        strength: "strong",
+        decision: "retrieve",
+        reason: "explicit_cue",
+      };
+    }
+  }
+  for (const pattern of WEAK_PATTERNS) {
+    if (pattern.test(text)) {
+      // Weak cues deliberately carry no decision: the engine keeps going and
+      // lets the local BGE head judge semantics.
+      return { kind: WEAK, strength: "weak", reason: "weak_cue" };
     }
   }
   return { kind: NEUTRAL };
@@ -227,12 +259,19 @@ export class RegexRouter {
       options.defaultDecision === "skip" || options.defaultDecision === "retrieve"
         ? options.defaultDecision
         : this.defaultDecision;
+    const weak = result.kind === WEAK;
     return {
       decision: fallback,
       probabilityRetrieve: fallback === "retrieve" ? 1 : 0,
       confidence: 1,
       uncertain: false,
-      reason: fallback === "retrieve" ? "default_retrieve" : "default_skip",
+      reason: weak
+        ? fallback === "retrieve"
+          ? "weak_cue_default_retrieve"
+          : "weak_cue_default_skip"
+        : fallback === "retrieve"
+          ? "default_retrieve"
+          : "default_skip",
     };
   }
 

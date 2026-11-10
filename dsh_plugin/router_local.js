@@ -7,8 +7,9 @@
  *   download a model from `agent/pre-step`);
  * - it reports `LOCAL_NOT_READY` / `LOCAL_BUSY` immediately instead of
  *   queueing behind `memory_search`, so the engine can degrade to regex;
- * - readiness is learned from `router.status` / `router.warmup` responses and
- *   cached, so the request path does not pay an extra round-trip just to check.
+ * - eligibility is optimistic: while warming, `op=route` itself is the probe,
+ *   so a stale cached readiness flag can never pin the router to regex;
+ * - `router.status` is only used to display state, not to gate routing.
  */
 
 export const LOCAL_NOT_READY = "LOCAL_NOT_READY";
@@ -56,7 +57,10 @@ export class LocalRouterClient {
     this._lastLatencyMs = null;
     this._lastError = null;
     this._warmupMs = null;
-    this._warmupRequested = false;
+    // A model/dimension/SHA mismatch is the only condition that should stop
+    // local attempts permanently.  "Warming" and transient busy/timeout are
+    // recoverable, so they must never latch the backend off.
+    this._fatal = false;
   }
 
   /** Configured backend name (`bge-head` / `onnx-intent` / `off`). */
@@ -69,10 +73,20 @@ export class LocalRouterClient {
     }
   }
 
-  /** @returns {boolean} */
+  /**
+   * Eligibility is deliberately optimistic: as long as the backend is not
+   * switched off and did not fail fatally, the engine should try one
+   * `op=route`.  The bridge answers `LOCAL_NOT_READY` in well under a
+   * millisecond while Python is still warming, which is far more robust than
+   * trusting a cached readiness flag (a stale flag used to pin the router to
+   * the regex fallback forever).
+   *
+   * @returns {boolean}
+   */
   isAvailable() {
     if (this.backendName() === "off") return false;
-    return this._ready === true;
+    if (this._fatal) return false;
+    return true;
   }
 
   /** @returns {boolean} */
@@ -97,9 +111,19 @@ export class LocalRouterClient {
     }
     try {
       const response = await this.bridge.routerStatus(timeoutMs);
+      if (!response) {
+        this._lastError = "LOCAL_TIMEOUT";
+        return this.describe();
+      }
       this._applyStatus(response);
+      if (this._state !== "ready") {
+        this.diag?.(
+          `[Router] local status: state=${this._state} error=${this._lastError ?? "-"}`,
+        );
+      }
     } catch (error) {
       this._lastError = error?.code || error?.message || "LOCAL_STATUS_FAILED";
+      this.diag?.(`[Router] local status failed: ${this._lastError}`);
     }
     return this.describe();
   }
@@ -111,7 +135,6 @@ export class LocalRouterClient {
    * @returns {Promise<object>}
    */
   async warmup() {
-    this._warmupRequested = true;
     if (!this.bridge || typeof this.bridge.warmupRouter !== "function") {
       this._lastError = LOCAL_NOT_READY;
       return { ok: false, code: LOCAL_NOT_READY };
@@ -148,19 +171,11 @@ export class LocalRouterClient {
     if (this.backendName() === "off") {
       throw new LocalRouterError(LOCAL_BACKEND_DISABLED, "local backend is off");
     }
+    if (this._fatal) {
+      throw new LocalRouterError(LOCAL_MODEL_MISMATCH, this._lastError || "local router disabled");
+    }
     if (!this.bridge || typeof this.bridge.routeQuery !== "function") {
       throw new LocalRouterError(LOCAL_NOT_READY, "bridge cannot route");
-    }
-    if (!this._ready) {
-      // One cheap re-check is allowed after a warmup request: the Python side
-      // warms in a background thread, so the first turns may still be cold.
-      // Keep the probe short so it can never eat the local budget slice.
-      if (this._warmupRequested && this.bridge.isBusy?.() === false) {
-        await this.status(60);
-      }
-      if (!this._ready) {
-        throw new LocalRouterError(LOCAL_NOT_READY, this._lastError || "router is not ready");
-      }
     }
     if (this.bridge.isBusy?.() === true) {
       throw new LocalRouterError(LOCAL_BUSY, "bridge is busy");
@@ -174,16 +189,20 @@ export class LocalRouterClient {
       signal,
     );
     if (!response) {
-      this._ready = false;
-      this._state = "failed";
+      // No response is a transport/queue problem, not a model failure: keep
+      // the backend eligible for the next turn.
       this._lastError = LOCAL_TIMEOUT;
       throw new LocalRouterError(LOCAL_TIMEOUT, "no response from bridge");
     }
     if (response.ok === false) {
       const code = String(response.code || LOCAL_NOT_READY);
-      if (code === LOCAL_NOT_READY || code === LOCAL_MODEL_MISMATCH) {
+      if (code === LOCAL_MODEL_MISMATCH) {
+        this._fatal = true;
         this._ready = false;
         this._state = "failed";
+      } else if (code === LOCAL_NOT_READY) {
+        this._ready = false;
+        this._state = "warming";
       }
       this._lastError = response.error || code;
       throw new LocalRouterError(code, response.error || code);
@@ -229,12 +248,15 @@ export class LocalRouterClient {
 
   _applyStatus(response) {
     if (!response || response.ok === false) {
+      const code = response?.code || response?.error || LOCAL_NOT_READY;
       this._ready = false;
-      this._state = "failed";
-      this._lastError = response?.code || response?.error || LOCAL_NOT_READY;
+      this._fatal = code === LOCAL_MODEL_MISMATCH;
+      this._state = this._fatal ? "failed" : "warming";
+      this._lastError = code;
       return;
     }
     this._ready = response.ready === true;
+    this._fatal = false;
     this._state = String(response.state || (this._ready ? "ready" : "unavailable"));
     this._backend = response.backend ?? this._backend;
     this._modelId = response.model_id ?? this._modelId;

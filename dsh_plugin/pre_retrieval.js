@@ -10,9 +10,11 @@
  * - `router.shadow_mode === true` -> retrieves exactly like the legacy path but
  *   only records what the router would have decided.
  *
- * The router never influences what gets injected: the `0.6` top-1 threshold and
- * `createMemoryHint` are unchanged, and an explicit `memory_search` tool call
- * never goes through here.
+ * The router never influences what gets injected.  The eligibility gate is
+ * still similarity-based, but RRF-hybrid hits may pass at 0.5 and keyword-only
+ * top hits are accepted (see `recallDecision`); `createMemoryHint` now states
+ * explicitly that confirmed facts should be used before reading files.  An
+ * explicit `memory_search` tool call never goes through here.
  */
 import { isUsableDialogueText, messageText } from "./holographic_events.js";
 import { hashQuery } from "./router_engine.js";
@@ -30,6 +32,13 @@ async function resolveCreateUserMessage(injected) {
 }
 
 export const SIMILARITY_THRESHOLD = 0.6;
+/**
+ * RRF-hybrid hits are confirmed by both the vector and the BM25 retriever, so
+ * they may pass at a slightly lower cosine score.  A short factual query such
+ * as "浇水闹钟取消了吗" sits at ~0.59 while being the obvious top hit; dropping
+ * it starves the model and makes it search files instead.
+ */
+export const FUSED_SIMILARITY_THRESHOLD = 0.5;
 const GREETINGS = new Set([
   "你好",
   "您好",
@@ -62,17 +71,100 @@ export function shouldSkipPreRetrieval(query) {
   return GREETINGS.has(normalizedGreeting(text));
 }
 
-export function topSimilarity(hits) {
-  const top = Array.isArray(hits) ? hits[0] : null;
-  if (!top) return 0;
-  if (typeof top.similarity === "number" && Number.isFinite(top.similarity)) {
-    return top.similarity;
+/** Cosine similarity of one hit, or 0 when the retriever did not report one. */
+export function hitSimilarity(hit) {
+  if (!hit || typeof hit !== "object") return 0;
+  if (typeof hit.similarity === "number" && Number.isFinite(hit.similarity)) {
+    return hit.similarity;
   }
   // Chroma cosine distance: similarity = 1 - distance.
-  if (typeof top.distance === "number" && Number.isFinite(top.distance)) {
-    return 1 - top.distance;
+  if (typeof hit.distance === "number" && Number.isFinite(hit.distance)) {
+    return 1 - hit.distance;
   }
   return 0;
+}
+
+/**
+ * Best cosine similarity across the returned hits.
+ *
+ * The previous implementation only looked at hit[0]; RRF can put a BM25-only
+ * hit first (no similarity at all), which then looked like 0 and silently
+ * dropped a perfectly good recall.
+ *
+ * @param {Array<object>} hits
+ * @returns {number}
+ */
+export function topSimilarity(hits) {
+  const list = Array.isArray(hits) ? hits : [];
+  let best = 0;
+  for (const hit of list) {
+    const score = hitSimilarity(hit);
+    if (score > best) best = score;
+  }
+  return best;
+}
+
+/**
+ * Decide whether a retrieved hit list is strong enough to inject.
+ *
+ * Rules, in order:
+ * 1. a hit's cosine similarity >= 0.6 (classic vector gate);
+ * 2. the top hit is `hybrid` (vector + BM25 agree) and >= 0.5;
+ * 3. the top hit is BM25-only but has a positive RRF score (lexical match
+ *    with no vector rank available);
+ * 4. any hit's cosine similarity >= 0.6 (the top fused hit may be lexical).
+ *
+ * @param {Array<object>} hits
+ * @returns {{inject: boolean, reason: string, score: number,
+ *   retrievalSource: string|null}}
+ */
+export function recallDecision(hits) {
+  const list = Array.isArray(hits) ? hits : [];
+  if (!list.length) {
+    return { inject: false, reason: "no_hits", score: 0, retrievalSource: null };
+  }
+  const top = list[0];
+  const score = topSimilarity(list);
+  const topScore = hitSimilarity(top);
+  const topSource = String(top?.retrieval_source || "");
+  if (topScore >= SIMILARITY_THRESHOLD) {
+    return {
+      inject: true,
+      reason: "vector",
+      score: topScore,
+      retrievalSource: topSource || null,
+    };
+  }
+  if (topSource === "hybrid" && topScore >= FUSED_SIMILARITY_THRESHOLD) {
+    return {
+      inject: true,
+      reason: "hybrid",
+      score: topScore,
+      retrievalSource: topSource,
+    };
+  }
+  if (topSource === "bm25" && Number(top?.rrf_score) > 0) {
+    return {
+      inject: true,
+      reason: "keyword",
+      score: topScore,
+      retrievalSource: topSource,
+    };
+  }
+  if (score >= SIMILARITY_THRESHOLD) {
+    return {
+      inject: true,
+      reason: "vector_any_hit",
+      score,
+      retrievalSource: topSource || null,
+    };
+  }
+  return {
+    inject: false,
+    reason: "below_threshold",
+    score: Math.max(score, topScore),
+    retrievalSource: topSource || null,
+  };
 }
 
 function memoryDate(hit) {
@@ -102,7 +194,7 @@ export function createMemoryHint(result) {
   if (!lines.length) return "";
   return [
     "<memory-hint>",
-    "[System Note: 以下是按时间顺序整理的历史记忆。若用户问及当前状态，请以最新记录为准；若问及流变过程，请说明前因后果。]",
+    "[System Note: 以下是用户长期记忆中已经确认过的事实（按时间排序）。回答时请优先直接使用这些事实；除非用户明确要求核实，否则不要为了确认这些事实去读取文件或运行脚本。若与当前对话冲突，以用户在最新一轮的明确说法为准；若问及变化过程，请说明前因后果。]",
     ...lines,
     "</memory-hint>",
   ].join("\n");
@@ -165,9 +257,12 @@ export function registerPreRetrieval(
     const hits = Array.isArray(result?.result?.results)
       ? result.result.results.slice(0, 3)
       : [];
-    const score = topSimilarity(hits);
-    if (score < SIMILARITY_THRESHOLD) {
-      const line = `[PreRetrieval] skipped: top similarity ${score.toFixed(3)} < ${SIMILARITY_THRESHOLD}`;
+    const recall = recallDecision(hits);
+    if (!recall.inject) {
+      const line =
+        `[PreRetrieval] skipped: ${recall.reason} ` +
+        `score=${recall.score.toFixed(3)} vector>=${SIMILARITY_THRESHOLD} ` +
+        `hybrid>=${FUSED_SIMILARITY_THRESHOLD}`;
       console.log(line);
       diag(line);
       return decision;
@@ -177,6 +272,10 @@ export function registerPreRetrieval(
       holoLog("Pre-retrieval skipped: no matching memories");
       return decision;
     }
+    diag(
+      `[PreRetrieval] inject: ${recall.reason} score=${recall.score.toFixed(3)} ` +
+        `source=${recall.retrievalSource || "unknown"} hits=${hits.length}`,
+    );
     holoLog(`Pre-retrieval success: injected ${hits.length} memories`);
     // DSH's user/message event must carry role="user" (system-role messages
     // are rejected by the session schema). Keep the user role, but use a
