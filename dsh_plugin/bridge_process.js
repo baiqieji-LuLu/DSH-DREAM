@@ -142,6 +142,107 @@ export class PythonBridge {
     this.diag(`bridge: ${trimmed}`);
   }
 
+  /** Whether any request is already awaiting a bridge response. */
+  isBusy() {
+    return this.pending.size > 0;
+  }
+
+  /**
+   * Send one line-protocol request and resolve its matching response.
+   * Never spawns, never provisions: callers gate on runtime readiness.
+   */
+  async _request(payload, timeoutMs, signal = null) {
+    if (!this.child?.stdin || this.child.stdin.destroyed) return null;
+    const requestId = randomUUID();
+    return new Promise((resolve) => {
+      let settled = false;
+      let timer = null;
+      const finish = (value) => {
+        if (settled) return;
+        settled = true;
+        if (timer) clearTimeout(timer);
+        this.pending.delete(requestId);
+        signal?.removeEventListener?.("abort", onAbort);
+        resolve(value);
+      };
+      const onAbort = () => finish(null);
+      timer = setTimeout(() => finish(null), Math.max(1, timeoutMs));
+      if (signal) {
+        if (signal.aborted) {
+          finish(null);
+          return;
+        }
+        signal.addEventListener("abort", onAbort, { once: true });
+      }
+      this.pending.set(requestId, { resolve: finish });
+      try {
+        this.child.stdin.write(
+          `${JSON.stringify({ ...payload, request_id: requestId })}\n`,
+        );
+      } catch (error) {
+        this.diag(`bridge request write failed: ${error?.stack || error}`);
+        finish(null);
+      }
+    });
+  }
+
+  /**
+   * `op=route`: binary local decision. Returns a protocol payload, or an
+   * immediate `LOCAL_NOT_READY` / `LOCAL_BUSY` without waiting.
+   */
+  async routeQuery(text, deadlineMs = 180, signal = null) {
+    const query = String(text || "").trim();
+    if (!query) return { ok: false, code: "INVALID_INPUT" };
+    if (!["ready", "installed"].includes(this.runtime.state.status)) {
+      return { ok: false, code: "LOCAL_NOT_READY" };
+    }
+    if (!this.child?.stdin || this.child.stdin.destroyed) {
+      return { ok: false, code: "LOCAL_NOT_READY" };
+    }
+    // The bridge is single-process and serial: a pending memory_search would
+    // otherwise make the router wait behind an 800 ms retrieval.
+    if (this.isBusy()) return { ok: false, code: "LOCAL_BUSY" };
+    const budget = Math.max(20, Number(deadlineMs) || 180);
+    const response = await this._request(
+      { op: "route", text: query, deadline_ms: budget },
+      budget,
+      signal,
+    );
+    return response || { ok: false, code: "LOCAL_TIMEOUT" };
+  }
+
+  /** `op=router.status`: cheap readiness probe, never warms up. */
+  async routerStatus(timeoutMs = 200, signal = null) {
+    if (!["ready", "installed"].includes(this.runtime.state.status)) {
+      return { ok: false, code: "LOCAL_NOT_READY" };
+    }
+    if (!this.child?.stdin || this.child.stdin.destroyed) {
+      return { ok: false, code: "LOCAL_NOT_READY" };
+    }
+    const response = await this._request(
+      { op: "router.status" },
+      Math.max(20, Number(timeoutMs) || 200),
+      signal,
+    );
+    return response || { ok: false, code: "LOCAL_NOT_READY" };
+  }
+
+  /**
+   * `op=router.warmup`: start the Python-side background warmup.
+   * Only the plugin startup path may call this (it may spawn the bridge).
+   */
+  async warmupRouter(timeoutMs = 5000) {
+    const child = await this.ensure();
+    if (!child?.stdin || child.stdin.destroyed) {
+      return { ok: false, code: "LOCAL_NOT_READY" };
+    }
+    const response = await this._request(
+      { op: "router.warmup" },
+      Math.max(100, Number(timeoutMs) || 5000),
+    );
+    return response || { ok: false, code: "LOCAL_NOT_READY" };
+  }
+
   async query(query, topK = 3, timeoutMs = 800, signal = null, timelineMode = false) {
     const text = String(query || "").trim();
     if (!text) return null;

@@ -1,6 +1,6 @@
 {
   "name": "DSH-DREAM",
-  "version": "0.3.6",
+  "version": "0.4.0",
   "description": "Persistent long-term memory for LLM agents with a DSH-native settings panel.",
   "entry_point": "agent_memory.plugin_entry",
   "dshPlugin": "dsh_plugin",
@@ -110,6 +110,125 @@
         "description": "When enabled, every completed turn writes the complete User and Assistant originals to the vector store, regardless of whether the agent called a tool.",
         "default": false,
         "ui:widget": "toggle"
+      },
+      "router_enabled": {
+        "type": "boolean",
+        "title": "RouterEngine (auto routing)",
+        "description": "Decide before retrieval whether the turn needs long-term memory. Off restores the exact pre-v0.4.0 behaviour.",
+        "default": true,
+        "ui:widget": "toggle"
+      },
+      "router_mode": {
+        "type": "string",
+        "title": "Router mode",
+        "description": "auto prefers cloud then local then regex; cloud/local/regex narrow the preference.",
+        "enum": [
+          "auto",
+          "cloud",
+          "local",
+          "regex"
+        ],
+        "default": "auto",
+        "ui:widget": "select"
+      },
+      "router_budget_ms": {
+        "type": "integer",
+        "title": "Router budget (ms)",
+        "description": "Hard deadline for the routing decision. Capped at 200 ms; ambiguity and timeouts default to retrieve.",
+        "default": 200,
+        "minimum": 50,
+        "maximum": 200,
+        "ui:widget": "number"
+      },
+      "router_threshold": {
+        "type": "number",
+        "title": "Router threshold",
+        "description": "Probability threshold for the cloud and regex layers.",
+        "default": 0.55,
+        "minimum": 0,
+        "maximum": 1,
+        "ui:widget": "number"
+      },
+      "router_uncertainty_band": {
+        "type": "number",
+        "title": "Uncertainty band",
+        "description": "Inside this band the router abstains and still retrieves (better to over-retrieve than to forget).",
+        "default": 0.1,
+        "minimum": 0,
+        "maximum": 0.3,
+        "ui:widget": "number"
+      },
+      "router_timeout_policy": {
+        "type": "string",
+        "title": "Timeout policy",
+        "description": "Decision when the 200 ms budget expires: retrieve (neutral default) or bypass_main.",
+        "enum": [
+          "retrieve",
+          "bypass_main"
+        ],
+        "default": "retrieve",
+        "ui:widget": "select"
+      },
+      "router_shadow_mode": {
+        "type": "boolean",
+        "title": "Router shadow mode",
+        "description": "Always retrieve like the legacy path, but log what RouterEngine would have decided.",
+        "default": false,
+        "ui:widget": "toggle"
+      },
+      "router_cloud_enabled": {
+        "type": "boolean",
+        "title": "Use a cloud decision model",
+        "description": "Off by default. When enabled, the query text is sent to the configured decision provider.",
+        "default": false,
+        "ui:widget": "toggle"
+      },
+      "router_cloud_provider": {
+        "type": "string",
+        "title": "Cloud provider",
+        "description": "Preset id: typesafe, ali-bailian, tokenrhythm, openai, local-laya, or custom.",
+        "default": "",
+        "ui:widget": "text"
+      },
+      "router_cloud_base_url": {
+        "type": "string",
+        "title": "Cloud endpoint base URL",
+        "description": "Base URL of the decision endpoint; workspace-level for ali-bailian.",
+        "default": "",
+        "ui:widget": "text"
+      },
+      "router_cloud_path": {
+        "type": "string",
+        "title": "Cloud endpoint path",
+        "description": "Decision endpoint path, for example /v1/systemone.",
+        "default": "",
+        "ui:widget": "text"
+      },
+      "router_cloud_model": {
+        "type": "string",
+        "title": "Cloud decision model",
+        "description": "Model name for the active provider.",
+        "default": "",
+        "ui:widget": "text"
+      },
+      "router_cloud_api_key_env": {
+        "type": "string",
+        "title": "Cloud credential env var",
+        "description": "Environment variable holding the provider key. The key itself is never stored in the bridge file.",
+        "default": "",
+        "ui:widget": "text"
+      },
+      "router_local_backend": {
+        "type": "string",
+        "title": "Local router backend",
+        "description": "bge-head reuses the local BGE encoder (default), onnx-intent is optional, off disables the local layer.",
+        "enum": [
+          "bge-head",
+          "onnx-intent",
+          "off"
+        ],
+        "default": "bge-head",
+        "ui:widget": "select"
       }
     }
   },
@@ -233,6 +352,125 @@
         "description": "When enabled, every completed turn writes the complete User and Assistant originals to the vector store, regardless of whether the agent called a tool.",
         "default": false,
         "ui:widget": "toggle"
+      },
+      "router_enabled": {
+        "type": "boolean",
+        "title": "RouterEngine (auto routing)",
+        "description": "Decide before retrieval whether the turn needs long-term memory. Off restores the exact pre-v0.4.0 behaviour.",
+        "default": true,
+        "ui:widget": "toggle"
+      },
+      "router_mode": {
+        "type": "string",
+        "title": "Router mode",
+        "description": "auto prefers cloud then local then regex; cloud/local/regex narrow the preference.",
+        "enum": [
+          "auto",
+          "cloud",
+          "local",
+          "regex"
+        ],
+        "default": "auto",
+        "ui:widget": "select"
+      },
+      "router_budget_ms": {
+        "type": "integer",
+        "title": "Router budget (ms)",
+        "description": "Hard deadline for the routing decision. Capped at 200 ms; ambiguity and timeouts default to retrieve.",
+        "default": 200,
+        "minimum": 50,
+        "maximum": 200,
+        "ui:widget": "number"
+      },
+      "router_threshold": {
+        "type": "number",
+        "title": "Router threshold",
+        "description": "Probability threshold for the cloud and regex layers.",
+        "default": 0.55,
+        "minimum": 0,
+        "maximum": 1,
+        "ui:widget": "number"
+      },
+      "router_uncertainty_band": {
+        "type": "number",
+        "title": "Uncertainty band",
+        "description": "Inside this band the router abstains and still retrieves (better to over-retrieve than to forget).",
+        "default": 0.1,
+        "minimum": 0,
+        "maximum": 0.3,
+        "ui:widget": "number"
+      },
+      "router_timeout_policy": {
+        "type": "string",
+        "title": "Timeout policy",
+        "description": "Decision when the 200 ms budget expires: retrieve (neutral default) or bypass_main.",
+        "enum": [
+          "retrieve",
+          "bypass_main"
+        ],
+        "default": "retrieve",
+        "ui:widget": "select"
+      },
+      "router_shadow_mode": {
+        "type": "boolean",
+        "title": "Router shadow mode",
+        "description": "Always retrieve like the legacy path, but log what RouterEngine would have decided.",
+        "default": false,
+        "ui:widget": "toggle"
+      },
+      "router_cloud_enabled": {
+        "type": "boolean",
+        "title": "Use a cloud decision model",
+        "description": "Off by default. When enabled, the query text is sent to the configured decision provider.",
+        "default": false,
+        "ui:widget": "toggle"
+      },
+      "router_cloud_provider": {
+        "type": "string",
+        "title": "Cloud provider",
+        "description": "Preset id: typesafe, ali-bailian, tokenrhythm, openai, local-laya, or custom.",
+        "default": "",
+        "ui:widget": "text"
+      },
+      "router_cloud_base_url": {
+        "type": "string",
+        "title": "Cloud endpoint base URL",
+        "description": "Base URL of the decision endpoint; workspace-level for ali-bailian.",
+        "default": "",
+        "ui:widget": "text"
+      },
+      "router_cloud_path": {
+        "type": "string",
+        "title": "Cloud endpoint path",
+        "description": "Decision endpoint path, for example /v1/systemone.",
+        "default": "",
+        "ui:widget": "text"
+      },
+      "router_cloud_model": {
+        "type": "string",
+        "title": "Cloud decision model",
+        "description": "Model name for the active provider.",
+        "default": "",
+        "ui:widget": "text"
+      },
+      "router_cloud_api_key_env": {
+        "type": "string",
+        "title": "Cloud credential env var",
+        "description": "Environment variable holding the provider key. The key itself is never stored in the bridge file.",
+        "default": "",
+        "ui:widget": "text"
+      },
+      "router_local_backend": {
+        "type": "string",
+        "title": "Local router backend",
+        "description": "bge-head reuses the local BGE encoder (default), onnx-intent is optional, off disables the local layer.",
+        "enum": [
+          "bge-head",
+          "onnx-intent",
+          "off"
+        ],
+        "default": "bge-head",
+        "ui:widget": "select"
       }
     }
   }

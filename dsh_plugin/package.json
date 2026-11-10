@@ -1,6 +1,6 @@
 {
   "name": "dsh-dream",
-  "version": "0.3.6",
+  "version": "0.4.0",
   "displayName": "DSH-DREAM 长期记忆",
   "private": true,
   "type": "module",
@@ -23,6 +23,10 @@
     "bridge_process.js",
     "memory_tools.js",
     "pre_retrieval.js",
+    "router_engine.js",
+    "router_regex.js",
+    "router_cloud.js",
+    "router_local.js",
     "turn_bridge.py",
     "cordis.patch.yml",
     "locale/*.json",

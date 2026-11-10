@@ -10,7 +10,14 @@ selection. This process trusts the injected environment:
 Protocols:
     {"op": "warmup", "request_id": "..."}
     {"op": "query", "request_id": "...", "query": "...", "top_k": 3}
+    {"op": "route", "request_id": "...", "text": "...", "deadline_ms": 180}
+    {"op": "router.status", "request_id": "..."}
+    {"op": "router.warmup", "request_id": "..."}
     {"user_msg": "...", "ai_msg": "..."}   # holographic write
+
+The three ``router.*``/``route`` branches MUST stay above the holographic
+write fallback: otherwise a router payload would be treated as a turn and
+rejected for missing user/assistant text.
 """
 
 from __future__ import annotations
@@ -151,6 +158,82 @@ def main() -> int:
                     timeline_mode=payload.get("timeline_mode") is True,
                 )
                 _emit({"request_id": request_id, "ok": True, "result": result})
+                continue
+
+            # --- RouterEngine (v0.4.0) -------------------------------------
+            # These branches deliberately precede the holographic fallback.
+            if payload.get("op") == "router.warmup":
+                try:
+                    result = get_plugin().warmup_router()
+                except Exception as exc:
+                    _emit(
+                        {
+                            "request_id": request_id,
+                            "ok": False,
+                            "code": "LOCAL_NOT_READY",
+                            "error": f"{type(exc).__name__}: {exc}",
+                        }
+                    )
+                    continue
+                _emit(
+                    {
+                        "request_id": request_id,
+                        "ok": True,
+                        "accepted": bool(result.get("accepted")),
+                        "state": result.get("state"),
+                        "backend": result.get("backend"),
+                        "model_id": result.get("model_id"),
+                        "warmup_timeout_ms": result.get("warmup_timeout_ms"),
+                        "error": result.get("error"),
+                    }
+                )
+                continue
+
+            if payload.get("op") == "router.status":
+                try:
+                    status = get_plugin().router_status()
+                except Exception as exc:
+                    _emit(
+                        {
+                            "request_id": request_id,
+                            "ok": False,
+                            "code": "LOCAL_NOT_READY",
+                            "error": f"{type(exc).__name__}: {exc}",
+                        }
+                    )
+                    continue
+                _emit({"request_id": request_id, **status})
+                continue
+
+            if payload.get("op") == "route":
+                text = str(payload.get("text") or "").strip()
+                if not text:
+                    _emit(
+                        {
+                            "request_id": request_id,
+                            "ok": False,
+                            "code": "INVALID_INPUT",
+                        }
+                    )
+                    continue
+                try:
+                    deadline_ms = int(payload.get("deadline_ms") or 180)
+                except (TypeError, ValueError):
+                    deadline_ms = 180
+                deadline_ms = max(1, min(1000, deadline_ms))
+                try:
+                    result = get_plugin().route_query(text, deadline_ms)
+                except Exception as exc:
+                    _emit(
+                        {
+                            "request_id": request_id,
+                            "ok": False,
+                            "code": "LOCAL_NOT_READY",
+                            "error": f"{type(exc).__name__}: {exc}",
+                        }
+                    )
+                    continue
+                _emit({"request_id": request_id, **result})
                 continue
 
             user_text = _clean_dialogue(payload.get("user_msg"))

@@ -18,6 +18,7 @@ import {
   writeFileSync,
 } from "node:fs";
 import { createRequire } from "node:module";
+import { homedir } from "node:os";
 import { dirname, resolve } from "node:path";
 import {
   applySessionEvent,
@@ -35,6 +36,9 @@ import {
 import { PythonBridge } from "./bridge_process.js";
 import { registerMemoryTools } from "./memory_tools.js";
 import { registerPreRetrieval } from "./pre_retrieval.js";
+import { CloudRouter } from "./router_cloud.js";
+import { createRouterEngine } from "./router_engine.js";
+import { LocalRouterClient } from "./router_local.js";
 
 // DSH's plugin contract injects declared services into `ctx` before apply().
 // Keep `tools` explicit so registration does not depend on a dynamic
@@ -240,6 +244,117 @@ export const Config = z.object({
       "Force-write complete user and assistant originals for every turn, even when the agent calls no memory tool.",
     )
     .volatile(),
+
+  // --- RouterEngine (v0.4.0) ---------------------------------------------
+  // The RouterEngine only decides whether a turn needs long-term memory; it
+  // never generates dialogue text. `router_enabled=false` restores the exact
+  // pre-v0.4.0 behaviour, and `router_shadow_mode=true` records decisions
+  // without ever intercepting retrieval.
+  router_enabled: z
+    .boolean()
+    .default(true)
+    .description(
+      "Enable RouterEngine. When off, every non-empty turn retrieves memory exactly as before v0.4.0.",
+    )
+    .volatile(),
+
+  router_mode: z
+    .string()
+    .default("auto")
+    .description("Arbitration preference: auto, cloud, local, or regex.")
+    .volatile(),
+
+  router_budget_ms: z
+    .natural()
+    .min(50)
+    .max(200)
+    .default(200)
+    .description(
+      "Hard routing budget in milliseconds. Values above 200 are rejected; ambiguity and timeouts default to retrieve.",
+    )
+    .volatile(),
+
+  router_threshold: z
+    .number()
+    .min(0)
+    .max(1)
+    .default(0.55)
+    .description("Probability threshold used by the cloud and regex layers.")
+    .volatile(),
+
+  router_uncertainty_band: z
+    .number()
+    .min(0)
+    .max(0.3)
+    .default(0.1)
+    .description(
+      "Abstention band around the threshold. Inside the band the engine retrieves (better to over-retrieve than to forget).",
+    )
+    .volatile(),
+
+  router_timeout_policy: z
+    .string()
+    .default("retrieve")
+    .description(
+      "Decision after the 200 ms deadline: retrieve (default, neutral) or bypass_main.",
+    )
+    .volatile(),
+
+  router_shadow_mode: z
+    .boolean()
+    .default(false)
+    .description(
+      "Shadow mode: always retrieve like the legacy path, but log what RouterEngine would have decided.",
+    )
+    .volatile(),
+
+  router_cloud_enabled: z
+    .boolean()
+    .default(false)
+    .description(
+      "Enable the cloud decision model. Off by default: the query text would leave this machine.",
+    )
+    .volatile(),
+
+  router_cloud_provider: z
+    .string()
+    .default("")
+    .description(
+      "Active cloud provider preset: typesafe, ali-bailian, tokenrhythm, openai, local-laya, or custom.",
+    )
+    .volatile(),
+
+  router_cloud_base_url: z
+    .string()
+    .default("")
+    .description("Cloud decision endpoint base URL (for example a workspace-level endpoint).")
+    .volatile(),
+
+  router_cloud_path: z
+    .string()
+    .default("")
+    .description("Decision endpoint path, for example /v1/systemone.")
+    .volatile(),
+
+  router_cloud_model: z
+    .string()
+    .default("")
+    .description("Decision model name for the active provider.")
+    .volatile(),
+
+  router_cloud_api_key_env: z
+    .string()
+    .default("")
+    .description(
+      "Environment variable holding the provider credential. The key itself is never stored here.",
+    )
+    .volatile(),
+
+  router_local_backend: z
+    .string()
+    .default("bge-head")
+    .description("Local router backend: bge-head (default), onnx-intent, or off.")
+    .volatile(),
 });
 
 /**
@@ -253,7 +368,7 @@ const current = (value) =>
     : value;
 
 /** Normalize a raw Config or Settings descriptor value for the Python bridge. */
-function normalizePayload(raw) {
+function normalizePayload(raw, previous = null) {
   const value = raw && typeof raw === "object" ? raw : {};
   const provider = String(current(value.embedding_provider) ?? "local")
     .trim()
@@ -280,6 +395,135 @@ function normalizePayload(raw) {
       current(value.auto_rebuild_collection) ?? true,
     ),
     holographic_mode: Boolean(current(value.holographic_mode) ?? false),
+    router: normalizeRouterPayload(value, previous),
+  };
+}
+
+/**
+ * Assemble the nested `router` block from flat `router_*` form fields while
+ * preserving any nested settings the settings form did not send.
+ *
+ * 中文说明：把扁平路由字段组装成嵌套配置；表单未提交的部分沿用已有值，
+ * 避免保存普通设置时把路由配置清空。
+ */
+function normalizeRouterPayload(value, previous) {
+  const previousRouter =
+    previous?.router && typeof previous.router === "object" ? previous.router : {};
+  const provided =
+    value.router && typeof value.router === "object" && current(value.router) !== null
+      ? current(value.router)
+      : null;
+  const nested = provided || previousRouter;
+  const nestedRegex =
+    nested.regex && typeof nested.regex === "object" ? nested.regex : {};
+  const nestedLocal =
+    nested.local && typeof nested.local === "object" ? nested.local : {};
+  const nestedCloud =
+    nested.cloud && typeof nested.cloud === "object" ? nested.cloud : {};
+  const nestedCache =
+    nested.cache && typeof nested.cache === "object" ? nested.cache : {};
+  const nestedCircuit =
+    nested.circuit && typeof nested.circuit === "object" ? nested.circuit : {};
+  const nestedAudit =
+    nested.audit && typeof nested.audit === "object" ? nested.audit : {};
+
+  const flatBoolean = (flatKey, fallback) => {
+    const raw = current(value[flatKey]);
+    if (raw === undefined || raw === null) return Boolean(fallback);
+    if (typeof raw === "string") {
+      const text = raw.trim().toLowerCase();
+      if (["1", "true", "yes", "on"].includes(text)) return true;
+      if (["0", "false", "no", "off"].includes(text)) return false;
+    }
+    return Boolean(raw);
+  };
+  const flatString = (flatKey, fallback) => {
+    const raw = current(value[flatKey]);
+    if (raw === undefined || raw === null) return fallback;
+    const text = String(raw).trim();
+    return text || fallback;
+  };
+  const flatNumber = (flatKey, fallback) => {
+    const raw = Number(current(value[flatKey]));
+    return Number.isFinite(raw) ? raw : fallback;
+  };
+
+  const activeProvider = flatString(
+    "router_cloud_provider",
+    String(nestedCloud.active ?? "").trim(),
+  );
+  const existingProviders =
+    nestedCloud.providers && typeof nestedCloud.providers === "object"
+      ? nestedCloud.providers
+      : {};
+  const providers = { ...existingProviders };
+  if (activeProvider) {
+    const base = { ...(providers[activeProvider] || {}) };
+    for (const [flatKey, target] of [
+      ["router_cloud_base_url", "base_url"],
+      ["router_cloud_path", "path"],
+      ["router_cloud_model", "model"],
+      ["router_cloud_api_key_env", "api_key_env"],
+    ]) {
+      const raw = current(value[flatKey]);
+      if (raw !== undefined && raw !== null && String(raw).trim() !== "") {
+        base[target] = String(raw).trim();
+      }
+    }
+    providers[activeProvider] = base;
+  }
+
+  return {
+    enabled: flatBoolean("router_enabled", nested.enabled ?? true),
+    mode: flatString("router_mode", String(nested.mode ?? "auto")),
+    budget_ms: flatNumber("router_budget_ms", Number(nested.budget_ms ?? 200)),
+    threshold: flatNumber("router_threshold", Number(nested.threshold ?? 0.55)),
+    uncertainty_band: flatNumber(
+      "router_uncertainty_band",
+      Number(nested.uncertainty_band ?? 0.1),
+    ),
+    timeout_policy: flatString(
+      "router_timeout_policy",
+      String(nested.timeout_policy ?? "retrieve"),
+    ),
+    error_policy: String(nested.error_policy ?? "fallback_regex"),
+    on_internal_error: String(nested.on_internal_error ?? "retrieve"),
+    shadow_mode: flatBoolean("router_shadow_mode", nested.shadow_mode ?? false),
+    regex: {
+      enabled: nestedRegex.enabled !== false,
+      default_decision:
+        nestedRegex.default_decision === "skip" ? "skip" : "retrieve",
+      explicit_fast_path: nestedRegex.explicit_fast_path === true,
+    },
+    local: {
+      backend: flatString(
+        "router_local_backend",
+        String(nestedLocal.backend ?? "bge-head"),
+      ),
+      hedge: nestedLocal.hedge !== false,
+      model_dir: String(nestedLocal.model_dir ?? "").trim(),
+      warmup_timeout_ms: Number(nestedLocal.warmup_timeout_ms ?? 30000),
+    },
+    cloud: {
+      enabled: flatBoolean("router_cloud_enabled", nestedCloud.enabled ?? false),
+      active: activeProvider,
+      budget_ms: Number(nestedCloud.budget_ms ?? 150),
+      providers,
+    },
+    cache: {
+      enabled: nestedCache.enabled !== false,
+      ttl_ms: Number(nestedCache.ttl_ms ?? 120000),
+      max_entries: Number(nestedCache.max_entries ?? 256),
+    },
+    circuit: {
+      failure_threshold: Number(nestedCircuit.failure_threshold ?? 3),
+      cooldown_ms: Number(nestedCircuit.cooldown_ms ?? 300000),
+    },
+    audit: {
+      enabled: nestedAudit.enabled !== false,
+      store_query: "hash",
+      max_bytes: Number(nestedAudit.max_bytes ?? 4194304),
+    },
   };
 }
 
@@ -328,14 +572,28 @@ export function apply(ctx, config) {
 
     const writeBridge = (payload) => {
       try {
-        const json = `${JSON.stringify(payload, null, 2)}\n`;
+        // The browser form posts only the fields it renders; keep the router
+        // block from the current file when the payload did not carry one.
+        const previousRouter = (() => {
+          try {
+            return readBridgeFile(target)?.router ?? null;
+          } catch {
+            return null;
+          }
+        })();
+        const merged = {
+          ...payload,
+          router:
+            payload?.router ?? previousRouter ?? normalizePayload({}).router,
+        };
+        const json = `${JSON.stringify(merged, null, 2)}\n`;
         if (json === lastJson) return;
         mkdirSync(dirname(target), { recursive: true });
         writeFileSync(target, json, "utf8");
         lastJson = json;
         diag(
           `bridge written: ${target}; payload=${JSON.stringify(
-            redactPayload(payload),
+            redactPayload(merged),
           )}`,
         );
         ctx.logger?.info?.("DSH-DREAM config bridge updated: %s", target);
@@ -390,19 +648,71 @@ export function apply(ctx, config) {
       return true;
     };
 
+    // --- RouterEngine (v0.4.0) -----------------------------------------
+    // The router only says "retrieve" or "skip"; it never writes dialogue or
+    // prompt text. Its audit log stores a query hash by default and lives
+    // outside the checkout so it can never be committed by accident.
+    const auditDir = resolve(
+      process.env.DSH_PROFILE_DIR || resolve(homedir(), ".dsh"),
+      ".dream",
+    );
+    const resolveRouterCredential = async (envName) => {
+      if (!envName) return "";
+      try {
+        const credentials =
+          typeof ctx.get === "function" ? ctx.get("credentials") : undefined;
+        if (credentials && typeof credentials.resolve === "function") {
+          const resolved = await credentials.resolve(envName);
+          const text =
+            typeof resolved === "string"
+              ? resolved
+              : resolved?.value ?? resolved?.secret ?? "";
+          if (text) return String(text);
+        }
+      } catch (error) {
+        diag(`[Router] credential service failed: ${error?.stack || error}`);
+      }
+      return String(process.env[envName] || "");
+    };
+    const localRouter = new LocalRouterClient({
+      bridge,
+      getConfig: () => readBridgeFile(target) || {},
+      diag,
+    });
+    const cloudRouter = new CloudRouter({
+      getConfig: () => readBridgeFile(target) || {},
+      resolveCredential: resolveRouterCredential,
+      diag,
+    });
+    const router = createRouterEngine({
+      getConfig: () => readBridgeFile(target) || {},
+      local: localRouter,
+      cloud: cloudRouter,
+      auditPath: resolve(auditDir, "router.jsonl"),
+      diag,
+    });
+
     registerMemoryTools(ctx, { queryMemory, writeTurn, diag });
     registerPreRetrieval(ctx, {
       queryMemory,
       holoLog,
       diag,
       getConfig: () => readBridgeFile(target) || {},
+      router,
     });
 
     runtime
       .ensureReady()
-      .then((state) => {
-        if (["ready", "installed"].includes(state.status)) return bridge.ensure();
-        return null;
+      .then(async (state) => {
+        if (!["ready", "installed"].includes(state.status)) return null;
+        const child = await bridge.ensure();
+        if (child) {
+          // Warmup is the only place that may load the local encoder; it runs
+          // after the bridge is ready and never from agent/pre-step.
+          await router.warmup();
+          void localRouter.status().catch(() => null);
+        }
+        return child;
       })
       .catch((error) => diag(`runtime warmup failed: ${error?.stack || error}`));
 
@@ -500,6 +810,7 @@ export function apply(ctx, config) {
 
     ctx.effect(
       () => () => {
+        router.close();
         bridge.close();
         turnStates.clear();
       },
@@ -612,7 +923,8 @@ export function apply(ctx, config) {
                 let raw = "";
                 for await (const chunk of req) raw += chunk;
                 const parsed = JSON.parse(raw || "{}");
-                const payload = normalizePayload(parsed);
+                const previous = readBridgeFile(target);
+                const payload = normalizePayload(parsed, previous);
                 console.log(
                   "🔥 [Host] HTTP 收到配置",
                   redactPayload(payload),

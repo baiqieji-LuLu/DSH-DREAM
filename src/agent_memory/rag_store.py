@@ -587,6 +587,40 @@ class RAGStore:
         """Return the exact-Flat threshold (0 disables it)."""
         return self._flat_max_records
 
+    def embed_query_text(self, query: str) -> list[float]:
+        """Embed one query text with the exact encoding used by retrieval.
+
+        The routing head reuses this vector so the router and ``search_memory``
+        never disagree about the instruction or the model.  When the configured
+        provider is a cloud ``/embeddings`` API, this method still works, but
+        callers must check ``embedding_provider`` first: the router must not
+        re-send a query to a remote endpoint.
+
+        中文说明：用与检索完全一致的 instruction 与模型给单条查询生成向量，
+        供本地路由头复用；调用方需先用 ``embedding_provider`` 判断是否允许复用
+        （云端 embedding 时路由不得把查询再发出去一次）。
+        """
+        query_text = self._validate_query(query)
+        if self._embedding_backend is not None:
+            # ONNX BGE backend applies the query instruction internally, exactly
+            # like the vector search path does.
+            vector = self._embedding_backend.embed_query(query_text)
+        elif self._embedding_function is not None:
+            encoded = (
+                f"{self._query_instruction}{query_text}"
+                if self._query_instruction
+                else query_text
+            )
+            vector = self._embedding_function([encoded])[0]
+        else:
+            raise RAGStoreUnavailableError(
+                "no embedding function is configured for the router head"
+            )
+        values = [float(value) for value in vector]
+        if not values:
+            raise RAGStoreError("embedding function returned an empty vector")
+        return values
+
     def _probe_embedding_dimension(self) -> int | None:
         """Measure the active model with the short ``dimension_check`` text."""
         if self._embedding_backend is not None:

@@ -23,13 +23,19 @@ from typing import Any, Final, Protocol
 
 from .anchor_manager import AnchorManager
 from .audit_logger import AuditLogger
-from .config import MemoryConfig, load_config, resolve_config_path
+from .config import (
+    MemoryConfig,
+    RouterConfig,
+    load_config,
+    resolve_config_path,
+)
 from .rag_store import (
     MemoryHit,
     RAGStore,
     validate_source_type,
 )
 from .renderer import build_prompt
+from .router import BgeHead, RouterService
 from .window_manager import WindowManager
 
 DEFAULT_RAG_TOP_K: Final[int] = 5
@@ -255,6 +261,7 @@ class MemoryPlugin:
         rag_top_k: int = DEFAULT_RAG_TOP_K,
         enable_memory: bool = True,
         rag_path: str | Path | None = None,
+        router: RouterConfig | None = None,
     ) -> None:
         self._anchor_manager = anchor_manager
         self._window_manager = window_manager
@@ -272,6 +279,9 @@ class MemoryPlugin:
             if rag_path is not None
             else None
         )
+        self._router_config = router or RouterConfig()
+        self._router_service: RouterService | None = None
+        self._router_lock = threading.Lock()
 
     @property
     def anchor_manager(self) -> AnchorManager:
@@ -543,6 +553,102 @@ class MemoryPlugin:
         payload["audit_snapshot_id"] = audit_snapshot_id
         return payload
 
+    # ---------------------------------------------------------- router engine
+
+    def embed_query(self, query: str) -> list[float]:
+        """Embed one query with the same encoder and instruction as retrieval.
+
+        The local router head reuses this vector, so the two paths can never
+        disagree about the model.  Cloud embedding providers are rejected here
+        on purpose: the router must not send the query off-machine a second
+        time (see DESIGN_ROUTER.md 2.1 risk 4).
+
+        中文说明：用与检索一致的编码器给查询生成向量，供本地路由头复用；
+        云端 embedding 用户不允许把查询再发一次，直接标记为不可用。
+        """
+        if not self._enable_memory:
+            raise RuntimeError("long-term memory is disabled")
+        provider = getattr(self._rag_store, "embedding_provider", "local")
+        if provider != "local":
+            raise RuntimeError(
+                "the local router head requires the local embedding provider"
+            )
+        embedder = getattr(self._rag_store, "embed_query_text", None)
+        if not callable(embedder):
+            raise RuntimeError("the memory backend cannot embed query text")
+        return embedder(_required_text(query, "query"))
+
+    def router_service(self) -> RouterService:
+        """Return the lazily built router service (never warm on this path)."""
+        with self._router_lock:
+            if self._router_service is None:
+                self._router_service = self._build_router_service()
+            return self._router_service
+
+    def _build_router_service(self) -> RouterService:
+        config = self._router_config
+        reason: str | None = None
+        provider = getattr(self._rag_store, "embedding_provider", "local")
+        embedder = getattr(self._rag_store, "embed_query_text", None)
+        if not self._enable_memory:
+            reason = "long-term memory is disabled"
+        elif config.local_backend == "off":
+            reason = "router.local.backend is off"
+        elif config.local_backend != "bge-head":
+            reason = f"local backend {config.local_backend!r} is not implemented"
+        elif provider != "local":
+            reason = "bge-head requires the local embedding provider"
+        elif not callable(embedder):
+            reason = "the memory backend cannot embed query text"
+        if reason is not None:
+            return RouterService(
+                None,
+                warmup_timeout_ms=config.local_warmup_timeout_ms,
+                unavailable_reason=reason,
+            )
+        model_name = str(
+            getattr(self._rag_store, "embedding_model_name", "") or "bge-small-zh-v1.5"
+        )
+        head = BgeHead(
+            embedder=embedder,
+            model_dir=config.local_model_dir or None,
+            threshold=config.threshold,
+            uncertainty_band=config.uncertainty_band,
+            embedding_model=model_name,
+        )
+        return RouterService(head, warmup_timeout_ms=config.local_warmup_timeout_ms)
+
+    def warmup_router(self) -> dict[str, Any]:
+        """Start local router warmup in the background.
+
+        Called once after the bridge is ready; never from ``agent/pre-step``.
+        Returns immediately so the Host language loop is not blocked.
+
+        中文说明：在桥接就绪后启动后台预热，绝不在 pre-step 触发。
+        """
+        service = self.router_service()
+        payload = service.warmup()
+        status = service.status()
+        return {
+            **payload,
+            "backend": status.get("backend"),
+            "model_id": status.get("model_id"),
+            "state": status.get("state"),
+            "warmup_timeout_ms": self._router_config.local_warmup_timeout_ms,
+        }
+
+    def router_status(self) -> dict[str, Any]:
+        """Return the current local router state without warming it up."""
+        return self.router_service().status()
+
+    def route_query(self, text: str, deadline_ms: int = 200) -> dict[str, Any]:
+        """Binary local decision for one query; never raises.
+
+        ``{"ok": False, "code": "LOCAL_NOT_READY" | "LOCAL_BUSY" | ...}`` tells
+        the Node engine to degrade immediately instead of waiting.
+        """
+        return self.router_service().route(text, deadline_ms)
+
     def record_turn(self, user_message: str, assistant_message: str) -> None:
         """Append a completed user/assistant turn to the conversation window.
 
@@ -642,6 +748,7 @@ def configure_plugin(
         rag_top_k=effective_top_k,
         enable_memory=effective_enable,
         rag_path=effective_config.rag_path,
+        router=effective_config.router,
     )
     global _default_plugin, _config_stamp
     with _plugin_lock:
@@ -691,6 +798,7 @@ def get_plugin() -> MemoryPlugin:
                 rag_top_k=config.retrieval_top_k,
                 enable_memory=config.enable_memory,
                 rag_path=config.rag_path,
+                router=config.router,
             )
             _config_stamp = stamp
         return _default_plugin
@@ -760,6 +868,26 @@ def get_rendered_context(current_query: str) -> dict[str, Any]:
     return get_plugin().get_rendered_context(current_query)
 
 
+def embed_query(query: str) -> list[float]:
+    """Return the retrieval-identical embedding for one query text."""
+    return get_plugin().embed_query(query)
+
+
+def warmup_router() -> dict[str, Any]:
+    """Start the local router warmup in the background."""
+    return get_plugin().warmup_router()
+
+
+def router_status() -> dict[str, Any]:
+    """Return the local router status without triggering warmup."""
+    return get_plugin().router_status()
+
+
+def route_query(text: str, deadline_ms: int = 200) -> dict[str, Any]:
+    """Return the local binary routing decision (never raises to the bridge)."""
+    return get_plugin().route_query(text, deadline_ms)
+
+
 def _hit_to_dict(hit: MemoryHit) -> dict[str, Any]:
     return {
         "memory_id": hit.memory_id,
@@ -814,6 +942,7 @@ __all__ = [
     "MemoryBackend",
     "MemoryPlugin",
     "configure_plugin",
+    "embed_query",
     "get_plugin",
     "get_plugin_status",
     "get_rendered_context",
@@ -822,4 +951,7 @@ __all__ = [
     "memory_add_turn",
     "memory_search",
     "reset_plugin",
+    "route_query",
+    "router_status",
+    "warmup_router",
 ]
