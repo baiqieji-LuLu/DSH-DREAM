@@ -99,7 +99,29 @@ history = store.search_memory("蓝色马克杯的完整历史", top_k=5, timelin
 python -m pytest -q
 ```
 
-## 3. 进阶配置：接入外部 Embedding API
+## 3. 已知问题：本地路由需要重新预热
+
+**症状**：闲聊也会触发记忆检索；`~/.dsh/dream/router.jsonl` 里
+`"source":"regex"`、`"degraded":true`、`"error_code":"LOCAL_NOT_READY"`，
+且单次判定耗时异常短（1–2 ms）。
+
+**原因**：本地 BGE 路由头的预热只在插件装载时触发一次。重装或热重载插件后，
+预热线程会失效且不会自动重试，Router 会降级为正则兜底——此时所有请求都会被判为
+`retrieve`，既多查库也浪费延迟。
+
+**解决**：完全退出 DSH 客户端再重新启动；启动后约 2 分钟内不要修改设置
+（预热期间改配置会重启桥接进程，导致预热再次中断）。
+
+**确认已恢复**：
+
+```powershell
+Get-Content "$env:USERPROFILE\.dsh\dream\router.jsonl" -Tail 1
+```
+
+最后一条记录中 `"source"` 应为 `"local"`、`"degraded"` 应为 `false`、
+`"latency_ms"` 通常在 30–40 ms 之间。
+
+## 4. 进阶配置：接入外部 Embedding API
 
 默认 Embedding 模型是 **`BAAI/bge-small-zh-v1.5`**，在本地运行，不需要 API Key。如果想使用云端 Embedding，打开 **Settings → DSH-DREAM → Embedding model (advanced)**，配置 OpenAI 兼容的 `/embeddings` 接口。
 
@@ -123,7 +145,7 @@ API key:   your Zhipu key
 
 如果你想在切换模型后保留旧数据，请保持 **“On dimension mismatch, try lossless re-embedding of old data”** 开启。DSH-DREAM 会缓存旧 documents/metadatas，重建集合，再用新模型写回；ID、来源类型、时间戳和 metadata 都会保留。云端重嵌入会消耗 Token，切换前建议先备份 `.chroma`。
 
-## 4. 核心特性
+## 5. 核心特性
 
 - **四层边界。** 锚点（硬约束）、最近窗口、检索记忆和审计快照各自独立。
 - **全息记忆。** `assistant_message` 已加入白名单，与 `user_message`、`system_fact`、`tool_result` 并列；`model_hint` 永远拒绝。`MemoryAgent` 会无条件双写完整回合；DSH 全息模式会在 `agent/turn-stopping` 强制写入。
@@ -135,7 +157,7 @@ API key:   your Zhipu key
 - **可审计。** 每次请求记录召回 chunk、窗口哈希和锚点版本。
 - **安全边界。** 锚点载荷硬上限 2000 Token；检索文本是不可信背景；用户文本用分隔符隔离。
 
-## 5. 架构与实测数据
+## 6. 架构与实测数据
 
 ### 检索：RRF + 精确 Flat
 

@@ -116,7 +116,31 @@ Run the test suite:
 python -m pytest -q
 ```
 
-## 3. Advanced Configuration: External Embedding API
+## 3. Known issue: local router needs a re-warm
+
+**Symptoms:** Small talk also triggers memory retrieval; `~/.dsh/dream/router.jsonl` shows
+`"source":"regex"`, `"degraded":true`, and `"error_code":"LOCAL_NOT_READY"`, with unusually
+short decision latency (1–2 ms).
+
+**Cause:** The local BGE router head is warmed only once when the plugin is loaded. After a
+reinstall or hot reload, the warm-up thread is gone and is not retried automatically, so the
+Router falls back to the regex layer — every request is treated as `retrieve`, which adds
+unnecessary database lookups and latency.
+
+**Fix:** Fully quit the DSH client and start it again. For about 2 minutes after startup, do
+not change settings: changing configuration during warm-up restarts the bridge process and
+interrupts the warm-up again.
+
+**Confirm recovery:**
+
+```powershell
+Get-Content "$env:USERPROFILE\.dsh\dream\router.jsonl" -Tail 1
+```
+
+In the last record, `"source"` should be `"local"`, `"degraded"` should be `false`, and
+`"latency_ms"` is usually around 30–40 ms.
+
+## 4. Advanced Configuration: External Embedding API
 
 The default embedding model is **`BAAI/bge-small-zh-v1.5`**, which runs locally and needs no
 API key. If you prefer a cloud embedding provider, open **Settings → DSH-DREAM → Embedding
@@ -147,7 +171,7 @@ dimension. The store caches the old documents and metadata, recreates the collec
 writes them back with the new model. IDs, source types, timestamps, and metadata are
 preserved; cloud re-embedding consumes tokens, so back up `.chroma` before switching.
 
-## 4. Core Features
+## 5. Core Features
 
 - **Four explicit layers.** Anchors (hard constraints), recent window, retrieved memories,
   and audit snapshots stay separate.
@@ -175,7 +199,7 @@ preserved; cloud re-embedding consumes tokens, so back up `.chroma` before switc
 - **Safety boundaries.** Anchor payloads are capped at 2000 tokens; retrieved text is
   untrusted background evidence; user text is delimiter-isolated.
 
-## 5. Architecture and Measured Results
+## 6. Architecture and Measured Results
 
 ### Retrieval: RRF + exact Flat
 
