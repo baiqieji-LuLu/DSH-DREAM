@@ -61,7 +61,8 @@ of your DSH build). Turn on:
   where the model extracted a fact.
 
 The on-screen **HOLO · RECORDING** badge is only a **hint** (controlled separately by
-`holo_indicator`), not the switch; hiding it does not stop recording.
+`holo_indicator`), not the switch; hiding it does not stop recording. It starts at the
+top-left of the conversation box and can be dragged anywhere.
 
 Click **Save**, then send a test message. The first retrieval may take a few seconds while
 the local vector database and embedding model are initialized.

@@ -47,7 +47,7 @@ setx DEEPSEEK_API_KEY "sk-your-key-here"
 - **启用长期记忆 / Enable long-term memory**；
 - 如果希望每轮都完整保存，再打开 **全息模式 / Holographic mode (forced full memory)**。
 
-界面上的「全息 · 落库中」小灯只是一个**提示**（由 `holo_indicator` 单独控制），不是开关；关掉提示不会停止落库。
+界面上的「全息 · 落库中」小灯只是一个**提示**（由 `holo_indicator` 单独控制），不是开关；关掉提示不会停止落库。小灯默认在会话框左上角，可拖动到别处。
 
 点击 **Save**，然后发送一条测试消息。第一次检索可能需要几秒钟初始化本地向量数据库和 Embedding 模型。
 

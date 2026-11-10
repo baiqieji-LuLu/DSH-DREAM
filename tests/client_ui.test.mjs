@@ -93,11 +93,11 @@ assert.ok(section, "settings.section was not registered");
 assert.equal(section.meta.id, "DSH-DREAM");
 
 const indicatorRegistration = slotRegistrations.find(
-  (entry) => entry.meta.name === "conversation.input.dock",
+  (entry) => entry.meta.name === "shell.overlay",
 );
 assert.ok(
   indicatorRegistration,
-  "conversation.input.dock indicator was not registered",
+  "shell.overlay indicator was not registered",
 );
 assert.equal(indicatorRegistration.meta.id, "dsh-dream-holo-indicator");
 assert.equal(
@@ -118,8 +118,8 @@ assert.deepEqual(missingEn, [], `missing en keys: ${missingEn.join(", ")}`);
 // --- Holographic indicator copy / payload --------------------------------
 assert.equal(dictionaries.zh.holoIndicatorOn, "全息 · 落库中");
 assert.equal(dictionaries.en.holoIndicatorOn, "HOLO · RECORDING");
-assert.equal(dictionaries.zh.holoStyleBadge, "badge（小灯）");
-assert.equal(dictionaries.zh.holoStyleTheme, "theme（黑底白字）");
+assert.equal(dictionaries.zh.holoIndicatorDrag, "拖动可调整位置");
+assert.equal(dictionaries.en.holoIndicatorDrag, "Drag to reposition");
 assert.match(dictionaries.zh.holoIndicatorHint, /不是全息开关/);
 assert.match(dictionaries.en.holoIndicatorHint, /not the holographic switch/i);
 assert.ok(
@@ -131,12 +131,31 @@ assert.ok(
   "settings mutation is missing holo_indicator",
 );
 assert.ok(
-  source.includes('.dsh-dream-holo-theme'),
-  "theme class is missing",
+  source.includes('[data-conversation-region="chat"]'),
+  "default position does not target the conversation box",
 );
 assert.ok(
-  source.includes('[data-conversation-region="chat"]'),
-  "theme is not scoped to the chat container",
+  source.includes("setPointerCapture"),
+  "badge drag is missing pointer capture",
+);
+assert.ok(
+  source.includes("localStorage"),
+  "badge drag position is not persisted",
+);
+assert.ok(source.includes("cursor: grab"), "badge is missing a drag cursor");
+assert.ok(
+  source.includes("position: absolute"),
+  "badge is not a floating overlay",
+);
+assert.equal(
+  source.includes("dsh-dream-holo-theme"),
+  false,
+  "the removed theme variant must not come back",
+);
+assert.equal(
+  source.includes("holoStyleTheme"),
+  false,
+  "the removed theme option must not come back",
 );
 
 // --- Required plain-language copy ---------------------------------------

@@ -2,13 +2,16 @@
  * Holographic-indicator behaviour tests (no DSH runtime, no browser).
  *
  * The component is captured from the real `client.js` registration and rendered
- * through a deliberately small React stand-in. The tests pin the four states
- * that matter for the acceptance criteria:
+ * through a deliberately small React stand-in. The tests pin the states that
+ * matter for the acceptance criteria:
  *
  * - holographic mode off            -> no DOM at all;
  * - indicator disabled             -> no DOM at all;
- * - badge style                    -> dot + label + aria, no theme class;
- * - theme style                    -> chat container class, clean removal.
+ * - badge enabled                  -> dot + label + aria, no theme surface;
+ * - legacy config                  -> badge default.
+ *
+ * Drag wiring is pinned statically: the badge must be an absolute overlay with
+ * pointer capture and a persisted frame-relative position.
  *
  * Run with:  node tests/holo_indicator.test.mjs
  */
@@ -22,40 +25,20 @@ const clientPath = fileURLToPath(
 );
 const source = readFileSync(clientPath, "utf8");
 
-// --- A minimal React + DOM stand-in --------------------------------------
+// --- A minimal React stand-in --------------------------------------------
 let snapshot = { status: "ready", value: {} };
 let created = [];
-let layoutEffects = [];
-const themeClasses = new Set();
-
-const fakeChatHost = {
-  classList: {
-    add: (name) => themeClasses.add(name),
-    remove: (name) => themeClasses.delete(name),
-    contains: (name) => themeClasses.has(name),
-  },
-};
-
-const fakeAnchor = {
-  closest: (selector) =>
-    selector === '[data-conversation-region="chat"]' ? fakeChatHost : null,
-};
 
 const fakeReact = {
   Fragment: Symbol("Fragment"),
   createElement(type, props, ...children) {
     const element = { type, props: props || {}, children };
     created.push(element);
-    if (props?.ref && typeof props.ref === "object") {
-      props.ref.current = fakeAnchor;
-    }
     return element;
   },
   useState: (initial) => [initial, () => {}],
   useEffect: () => {},
-  useLayoutEffect: (fn, deps) => {
-    layoutEffects.push({ fn, deps });
-  },
+  useLayoutEffect: () => {},
   useCallback: (fn) => fn,
   useRef: (initial) => ({ current: initial }),
   useSyncExternalStore: () => snapshot,
@@ -105,11 +88,11 @@ const ctx = {
 };
 exported.apply(ctx);
 
-const HoloIndicator = components["conversation.input.dock"];
+const HoloIndicator = components["shell.overlay"];
 assert.equal(
   typeof HoloIndicator,
   "function",
-  "conversation.input.dock indicator was not registered",
+  "shell.overlay indicator was not registered",
 );
 
 const t = (key) => dictionaries["settings.agentMemory"].zh[key] ?? key;
@@ -117,51 +100,46 @@ const t = (key) => dictionaries["settings.agentMemory"].zh[key] ?? key;
 function render(value) {
   snapshot = { status: "ready", value };
   created = [];
-  layoutEffects = [];
-  themeClasses.clear();
-  const result = HoloIndicator({ t, scope, sessionId: "session-test" });
-  return { result, elements: created, effects: layoutEffects };
+  const result = HoloIndicator({ t, scope });
+  return { result, elements: created };
 }
 
 function badgeOf(elements) {
   return elements.find(
-    (element) =>
-      element.props?.className === "dsh-dream-holo-indicator",
+    (element) => element.props?.className === "dsh-dream-holo-indicator",
   );
 }
 
 // --- Acceptance-shaped states -------------------------------------------
 let run = render({
   holographic_mode: false,
-  holo_indicator: { enabled: true, style: "badge" },
+  holo_indicator: { enabled: true },
 });
 assert.equal(run.result, null, "holographic off must render nothing");
 assert.equal(run.elements.length, 0, "holographic off must create no elements");
 
 run = render({
   holographic_mode: true,
-  holo_indicator: { enabled: false, style: "theme" },
+  holo_indicator: { enabled: false },
 });
 assert.equal(run.result, null, "indicator disabled must render nothing");
 assert.equal(run.elements.length, 0, "indicator disabled must create no elements");
-assert.equal(themeClasses.size, 0, "indicator disabled must not theme the chat");
 
 run = render({ holographic_mode: true });
 assert.ok(run.result, "legacy config must fall back to the badge");
 assert.ok(run.elements.some((element) => element.type === "style"));
 const badge = badgeOf(run.elements);
 assert.ok(badge, "badge element is missing");
-assert.equal(
-  badge.props["aria-label"],
-  dictionaries["settings.agentMemory"].zh.holoIndicatorAria,
-);
+assert.equal(badge.props.role, "status");
+assert.equal(badge.props.tabIndex, 0);
+assert.equal(badge.props["aria-keyshortcuts"], "ArrowLeft ArrowRight ArrowUp ArrowDown");
+assert.match(badge.props["aria-label"], /拖动可调整位置/);
+assert.equal(badge.props["aria-label"].startsWith("全息模式已开启"), true);
+assert.equal(badge.props.style.visibility, "hidden");
 const badgeText = badge.children.find(
   (child) => child?.props?.className === "dsh-dream-holo-indicator-text",
 );
-assert.equal(
-  badgeText?.children?.[0],
-  dictionaries["settings.agentMemory"].zh.holoIndicatorOn,
-);
+assert.equal(badgeText?.children?.[0], "全息 · 落库中");
 assert.equal(
   badge.children.some(
     (child) => child?.props?.className === "dsh-dream-holo-indicator-dot",
@@ -169,44 +147,32 @@ assert.equal(
   true,
   "badge dot is missing",
 );
-run.effects.forEach((effect) => effect.fn());
-assert.equal(themeClasses.size, 0, "badge style must not theme the chat");
 
-run = render({
-  holographic_mode: true,
-  holo_indicator: { enabled: true, style: "theme" },
-});
-assert.ok(run.result, "theme style must render the badge");
-const cleanup = run.effects[0].fn();
-assert.equal(
-  themeClasses.has("dsh-dream-holo-theme"),
-  true,
-  "theme class was not applied to the chat container",
-);
-cleanup();
-assert.equal(
-  themeClasses.has("dsh-dream-holo-theme"),
-  false,
-  "theme class was not removed on cleanup",
-);
-assert.equal(themeClasses.size, 0, "theme cleanup left variables behind");
+// --- The removed theme variant must stay removed -------------------------
+assert.equal(source.includes("dsh-dream-holo-theme"), false);
+assert.equal(source.includes("holoStyleTheme"), false);
 
-// --- Skin safety: the theme CSS stays scoped ----------------------------
+// --- Draggable frame overlay wiring --------------------------------------
+assert.ok(source.includes('[data-conversation-region="chat"]'));
+assert.ok(source.includes("[data-shell-overlay]"));
+assert.ok(source.includes("setPointerCapture"));
+assert.ok(source.includes("localStorage"));
+assert.ok(source.includes("cursor: grab"));
+assert.ok(source.includes("position: absolute"));
+assert.ok(source.includes("onPointerDown"));
+assert.ok(source.includes("onPointerMove"));
+assert.ok(source.includes("onPointerUp"));
+
+// --- The badge CSS stays scoped -----------------------------------------
 const cssStart = source.indexOf("const HOLO_CSS = `");
 const cssEnd = source.indexOf("`;", cssStart);
 const holoCss = source.slice(cssStart, cssEnd);
-assert.ok(holoCss.includes(".dsh-dream-holo-theme"));
-assert.ok(
-  holoCss.includes("--dsh-dream-holo-bg: #0d0d0d"),
-  "theme must use the dark surface",
-);
-assert.ok(
-  holoCss.includes("--dsh-dream-holo-fg: #f5f5f5"),
-  "theme must use light text",
-);
+assert.ok(holoCss.includes(".dsh-dream-holo-indicator"));
+assert.ok(holoCss.includes("cursor: grab"));
+assert.ok(holoCss.includes("pointer-events: auto"));
 assert.ok(
   !/(^|\n)\s*(body|html|:root)\b/.test(holoCss),
-  "theme CSS must not target body/html/:root",
+  "badge CSS must not target body/html/:root",
 );
 
 console.log("holo_indicator.test.mjs: 1 test passed");

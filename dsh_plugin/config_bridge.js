@@ -32,22 +32,22 @@ const CLOUD_FLAT_KEYS = [
 /**
  * UI-only holographic indicator defaults.
  *
- * `enabled` is the interface master switch; `style` selects the visual
- * variant. Neither value participates in the write decision.
+ * `enabled` is the interface master switch. It never participates in the
+ * write decision; `holographic_mode` remains the only write switch.
  */
 export const HOLO_INDICATOR_DEFAULT = Object.freeze({
   enabled: true,
-  style: "badge",
 });
 
 /**
  * Normalize the nested `holo_indicator` block from the Config form, the
- * settings descriptor, or the bridge file. A missing block (old config) and an
- * unknown style both fall back to the documented defaults.
+ * settings descriptor, or the bridge file. A missing block (old config) falls
+ * back to the documented default; an old `style` key is ignored so removing
+ * the theme variant never breaks an existing bridge file.
  *
  * @param {unknown} value Raw indicator value (possibly a volatile reference).
  * @param {unknown} [previous] Previously normalized indicator block.
- * @returns {{ enabled: boolean, style: "badge" | "theme" }}
+ * @returns {{ enabled: boolean }}
  */
 export function normalizeHoloIndicator(value, previous = null) {
   const currentValue = current(value);
@@ -57,15 +57,11 @@ export function normalizeHoloIndicator(value, previous = null) {
   const fallback =
     previousValue && typeof previousValue === "object" ? previousValue : {};
   const enabled = current(source.enabled ?? fallback.enabled);
-  const style = String(current(source.style ?? fallback.style) ?? "")
-    .trim()
-    .toLowerCase();
   return {
     enabled:
       enabled === undefined || enabled === null
         ? HOLO_INDICATOR_DEFAULT.enabled
         : Boolean(enabled),
-    style: style === "theme" ? "theme" : HOLO_INDICATOR_DEFAULT.style,
   };
 }
 

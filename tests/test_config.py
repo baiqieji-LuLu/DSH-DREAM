@@ -174,11 +174,7 @@ def test_holo_indicator_is_tolerated_and_preserved() -> None:
         )
         config = load_config(bridge)
         assert config.holo_indicator.enabled is False
-        assert config.holo_indicator.style == "theme"
-        assert config.to_dict()["holo_indicator"] == {
-            "enabled": False,
-            "style": "theme",
-        }
+        assert config.to_dict()["holo_indicator"] == {"enabled": False}
     finally:
         bridge.unlink(missing_ok=True)
 
@@ -198,7 +194,7 @@ def test_legacy_config_defaults_holo_indicator() -> None:
         config = load_config(bridge)
         assert config.holographic_mode is True
         assert config.holo_indicator.enabled is True
-        assert config.holo_indicator.style == "badge"
+        assert config.to_dict()["holo_indicator"] == {"enabled": True}
     finally:
         bridge.unlink(missing_ok=True)
 
@@ -217,7 +213,7 @@ def test_invalid_holo_indicator_falls_back_to_defaults() -> None:
         )
         config = load_config(bridge)
         assert config.holo_indicator.enabled is True
-        assert config.holo_indicator.style == "badge"
+        assert config.to_dict()["holo_indicator"] == {"enabled": True}
     finally:
         bridge.unlink(missing_ok=True)
 

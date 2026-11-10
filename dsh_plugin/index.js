@@ -255,16 +255,10 @@ export const Config = z.object({
         .boolean()
         .default(true)
         .description(
-          "Show the holographic recording indicator. This is a hint only, not the write switch.",
-        ),
-      style: z
-        .union([z.const("badge"), z.const("theme")])
-        .default("badge")
-        .description(
-          "badge shows only the small dot and label; theme also turns the chat container into black background with white text.",
+          "Show the draggable holographic recording badge. This is a hint only, not the write switch.",
         ),
     })
-    .default({ enabled: true, style: "badge" })
+    .default({ enabled: true })
     .description(
       "Visual hint for holographic mode. It does not control memory writes.",
     )

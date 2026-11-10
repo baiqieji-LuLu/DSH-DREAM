@@ -72,7 +72,6 @@ DEFAULT_EMBEDDING_MODEL: Final[str] = ""
 DEFAULT_EMBEDDING_API_KEY: Final[str] = ""
 DEFAULT_EMBEDDING_BASE_URL: Final[str] = ""
 DEFAULT_HOLO_INDICATOR_ENABLED: Final[bool] = True
-DEFAULT_HOLO_INDICATOR_STYLE: Final[str] = "badge"
 
 # --- RouterEngine defaults (v0.4.0) ---------------------------------------
 #
@@ -346,20 +345,19 @@ class HoloIndicatorConfig:
     """UI-only holographic indicator settings.
 
     This block never controls whether a turn is written; it only tells the web
-    client whether to show the on-screen hint and which visual variant to use.
-    The Python side tolerates the key so an old/new bridge file can always be
-    loaded, even though the backend itself never renders anything.
+    client whether to show the draggable on-screen badge. The Python side
+    tolerates the key so an old/new bridge file can always be loaded, even
+    though the backend itself never renders anything.
 
-    中文说明：全息提示的界面配置。它不控制是否落库，只决定前端是否显示提示
-    以及提示样式；Python 端即使不渲染，也必须能容忍该键。
+    中文说明：全息提示的界面配置。它不控制是否落库，只决定前端是否显示可拖动
+    的小灯；Python 端即使不渲染，也必须能容忍该键。
     """
 
     enabled: bool = DEFAULT_HOLO_INDICATOR_ENABLED
-    style: str = DEFAULT_HOLO_INDICATOR_STYLE
 
     def to_dict(self) -> dict[str, Any]:
         """Return the JSON-safe nested indicator block."""
-        return {"enabled": self.enabled, "style": self.style}
+        return {"enabled": self.enabled}
 
 
 @dataclass(frozen=True, slots=True)
@@ -551,17 +549,11 @@ def _coerce_holo_indicator(value: Any) -> HoloIndicatorConfig:
     但旧/新桥接文件都必须能正常读取，且不影响其他字段。
     """
     if isinstance(value, Mapping):
-        style = _coerce_choice(
-            value.get("style"),
-            DEFAULT_HOLO_INDICATOR_STYLE,
-            ("badge", "theme"),
-        )
         return HoloIndicatorConfig(
             enabled=_coerce_bool(
                 value.get("enabled"),
                 DEFAULT_HOLO_INDICATOR_ENABLED,
             ),
-            style=style,
         )
     return HoloIndicatorConfig()
 
@@ -676,7 +668,6 @@ __all__ = (
     "DEFAULT_EMBEDDING_MODEL",
     "DEFAULT_EMBEDDING_PROVIDER",
     "DEFAULT_HOLO_INDICATOR_ENABLED",
-    "DEFAULT_HOLO_INDICATOR_STYLE",
     "DEFAULT_MAX_WINDOW_TOKENS",
     "DEFAULT_RAG_PATH",
     "DEFAULT_RETRIEVAL_TOP_K",

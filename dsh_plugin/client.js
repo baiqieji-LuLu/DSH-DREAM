@@ -79,13 +79,11 @@ window.__ModuleLoader__.load({
       holographicBadge: 'FORCE MEMORY',
       holoIndicator: 'Show holographic indicator',
       holoIndicatorHint:
-        'A UI hint only — not the holographic switch. Hiding it does not stop recording.',
-      holoIndicatorStyle: 'Indicator style',
-      holoStyleBadge: 'badge (dot only)',
-      holoStyleTheme: 'theme (black background, white text)',
+        'A UI hint only — not the holographic switch. Hiding it does not stop recording. Drag the badge to move it.',
       holoIndicatorOn: 'HOLO · RECORDING',
       holoIndicatorAria:
         'Holographic mode is on. Every turn is being written to long-term memory.',
+      holoIndicatorDrag: 'Drag to reposition',
       routerTitle: 'Smart routing (Router)',
       routerEnabled: 'Smart intent cutoff',
       routerEnabledHint:
@@ -198,13 +196,11 @@ window.__ModuleLoader__.load({
       holographicBadge: '强制记忆',
       holoIndicator: '显示全息提示',
       holoIndicatorHint:
-        '这只是界面提示，不是全息开关；关闭提示不会停止落库。',
-      holoIndicatorStyle: '提示样式',
-      holoStyleBadge: 'badge（小灯）',
-      holoStyleTheme: 'theme（黑底白字）',
+        '这只是界面提示，不是全息开关；关闭提示不会停止落库。小灯可在页面上拖动。',
       holoIndicatorOn: '全息 · 落库中',
       holoIndicatorAria:
         '全息模式已开启，每轮对话都会自动写入长期记忆。',
+      holoIndicatorDrag: '拖动可调整位置',
       routerTitle: '智能路由（Router）',
       routerEnabled: '智能意图截断',
       routerEnabledHint:
@@ -451,11 +447,6 @@ window.__ModuleLoader__.load({
         color: var(--dsw-alias-label-primary);
         font-weight: 500;
       }
-      .am-holo-indicator .am-select {
-        width: 210px;
-        max-width: 100%;
-        height: 30px;
-      }
       .am-warning {
         margin: 16px 0 10px;
         color: var(--dsw-alias-state-error-primary, #f85149);
@@ -547,36 +538,28 @@ window.__ModuleLoader__.load({
     `;
 
     /*
-     * Holographic indicator (chat surface).
+     * Holographic indicator (frame overlay).
      *
-     * The badge lives in `conversation.input.dock` (just above the composer),
-     * and the `theme` variant adds one class to the chat container. The class
-     * defines chat-local CSS variables only; it never touches `document.body`,
-     * `:root`, or the skin's global theme variables. Removing the class removes
-     * every variable it introduced, so exit is clean.
+     * The badge lives in `shell.overlay`, the frame-wide click-through layer,
+     * so it can float at the top of the conversation box and be dragged
+     * anywhere without participating in the composer layout. Its position is
+     * frame-relative and remembered in localStorage; a frame resize clamps a
+     * dragged badge and re-anchors a never-dragged one to the conversation box.
      */
-    const HOLO_THEME_CLASS = 'dsh-dream-holo-theme';
+    const HOLO_POSITION_KEY = 'dsh-dream.holo-indicator.position.v1';
+    const HOLO_DEFAULT_INSET = 12;
 
     const HOLO_CSS = `
-      .dsh-dream-holo-indicator-row {
-        display: flex;
-        align-items: center;
-        justify-content: flex-end;
-        padding: 0 2px;
-        pointer-events: none;
-      }
       .dsh-dream-holo-indicator {
+        position: absolute;
+        z-index: 30;
         display: inline-flex;
         align-items: center;
         gap: 6px;
         padding: 2px 8px;
         border: 0.5px solid var(--dsw-alias-border-l3, rgba(128, 128, 128, 0.45));
         border-radius: 999px;
-        background: color-mix(
-          in srgb,
-          var(--dsw-alias-bg-base, #808080) 84%,
-          transparent
-        );
+        background: var(--dsw-alias-bg-layer-2, rgba(127, 127, 127, 0.18));
         color: var(--dsw-alias-label-secondary, #666666);
         font-size: 11px;
         line-height: 16px;
@@ -584,6 +567,17 @@ window.__ModuleLoader__.load({
         letter-spacing: 0.02em;
         white-space: nowrap;
         user-select: none;
+        cursor: grab;
+        touch-action: none;
+        pointer-events: auto;
+        box-shadow: 0 1px 4px rgba(0, 0, 0, 0.16);
+      }
+      .dsh-dream-holo-indicator[data-dragging='true'] {
+        cursor: grabbing;
+      }
+      .dsh-dream-holo-indicator:focus-visible {
+        outline: 2px solid var(--dsw-focus-ring-color, var(--dsw-alias-state-business-primary));
+        outline-offset: 2px;
       }
       .dsh-dream-holo-indicator-dot {
         flex: none;
@@ -595,57 +589,102 @@ window.__ModuleLoader__.load({
           0 0 0 1px #ffffff,
           0 0 0 2px rgba(0, 0, 0, 0.55);
       }
-      .dsh-dream-holo-theme {
-        --dsh-dream-holo-bg: #0d0d0d;
-        --dsh-dream-holo-fg: #f5f5f5;
-        --dsh-dream-holo-fg-muted: #c9c9c9;
-        --dsh-dream-holo-fill: #1b1b1b;
-        --dsh-dream-holo-line: rgba(255, 255, 255, 0.18);
-
-        background-color: var(--dsh-dream-holo-bg);
-        color: var(--dsh-dream-holo-fg);
-
-        /* Chat-local remap: the skin's global rules stay untouched. */
-        --dsw-alias-bg-base: var(--dsh-dream-holo-bg);
-        --dsw-alias-bg-layer-1: var(--dsh-dream-holo-bg);
-        --dsw-alias-bg-layer-2: var(--dsh-dream-holo-fill);
-        --dsw-alias-bg-layer-3: #262626;
-        --dsw-alias-bg-module-platform: var(--dsh-dream-holo-fill);
-        --dsw-alias-label-primary: var(--dsh-dream-holo-fg);
-        --dsw-alias-label-primary-bluish: var(--dsh-dream-holo-fg);
-        --dsw-alias-label-primary-dimmed: var(--dsh-dream-holo-fg-muted);
-        --dsw-alias-label-secondary: var(--dsh-dream-holo-fg-muted);
-        --dsw-alias-label-tertiary: #b8b8b8;
-        --dsw-alias-label-caption: #a8a8a8;
-        --dsw-alias-label-dimmed: #979797;
-        --dsw-alias-border-l1: #2a2a2a;
-        --dsw-alias-border-l2: #363636;
-        --dsw-alias-border-l3: #4a4a4a;
-        --dsw-alias-border-l4: #5c5c5c;
-        --dsw-alias-interactive-bg-hover: var(--dsh-dream-holo-line);
-        --dsw-alias-interactive-bg-hover-solid: #222222;
-        --dsw-alias-interactive-bg-active: rgba(255, 255, 255, 0.12);
-        --dsw-alias-scrollbar-bg-l1: rgba(255, 255, 255, 0.18);
-        --dsw-alias-scrollbar-bg-l2: rgba(255, 255, 255, 0.24);
-        --dsw-alias-scrollbar-hover-l2: rgba(255, 255, 255, 0.36);
-        --dsw-specific-input-major: var(--dsh-dream-holo-bg);
-        --dsw-specific-selector: var(--dsh-dream-holo-fill);
-        --dsw-specific-menu: var(--dsh-dream-holo-bg);
-        --dsw-elevation-stroke-color: var(--dsh-dream-holo-line);
-        --dsw-elevation-soft: 0 2px 8px rgba(0, 0, 0, 0.4);
-        --dsw-elevation-panel: 0 8px 24px rgba(0, 0, 0, 0.5);
-        --dsw-elevation-prominent: 0 16px 40px rgba(0, 0, 0, 0.6);
-      }
     `;
 
     const EMPTY_HOLO_SNAPSHOT = { status: 'unavailable', value: {} };
 
-    function normalizeHoloIndicatorStyle(value) {
-      return value === 'theme' ? 'theme' : 'badge';
+    function findHoloChatHost() {
+      if (typeof document === 'undefined') return null;
+      const hosts = Array.from(
+        document.querySelectorAll('[data-conversation-region="chat"]'),
+      );
+      let best = null;
+      let bestArea = 0;
+      for (const host of hosts) {
+        const rect = host.getBoundingClientRect?.();
+        if (!rect || rect.width <= 0 || rect.height <= 0) continue;
+        const area = rect.width * rect.height;
+        if (area > bestArea) {
+          best = host;
+          bestArea = area;
+        }
+      }
+      return best;
+    }
+
+    function holoOverlayRect(node) {
+      const overlay = node?.closest?.('[data-shell-overlay]');
+      const rect = overlay?.getBoundingClientRect?.();
+      if (rect && rect.width > 0 && rect.height > 0) return rect;
+      if (typeof window === 'undefined') {
+        return { left: 0, top: 0, width: 0, height: 0 };
+      }
+      return {
+        left: 0,
+        top: 0,
+        width: window.innerWidth,
+        height: window.innerHeight,
+      };
+    }
+
+    function clampHoloPosition(left, top, node) {
+      const frame = holoOverlayRect(node);
+      const width = node?.offsetWidth || 150;
+      const height = node?.offsetHeight || 28;
+      return {
+        left: Math.min(Math.max(0, left), Math.max(0, frame.width - width)),
+        top: Math.min(Math.max(0, top), Math.max(0, frame.height - height)),
+      };
+    }
+
+    function defaultHoloPosition(node) {
+      const frame = holoOverlayRect(node);
+      const chat = findHoloChatHost();
+      const chatRect = chat?.getBoundingClientRect?.();
+      if (!chatRect) {
+        return clampHoloPosition(
+          HOLO_DEFAULT_INSET,
+          HOLO_DEFAULT_INSET,
+          node,
+        );
+      }
+      return clampHoloPosition(
+        chatRect.left - frame.left + HOLO_DEFAULT_INSET,
+        chatRect.top - frame.top + HOLO_DEFAULT_INSET,
+        node,
+      );
+    }
+
+    function readHoloPosition() {
+      try {
+        const raw = window.localStorage.getItem(HOLO_POSITION_KEY);
+        if (!raw) return null;
+        const parsed = JSON.parse(raw);
+        if (
+          Number.isFinite(parsed?.left) &&
+          Number.isFinite(parsed?.top)
+        ) {
+          return { left: parsed.left, top: parsed.top };
+        }
+      } catch {
+        // A private/blocked localStorage must not break the badge.
+      }
+      return null;
+    }
+
+    function saveHoloPosition(position) {
+      try {
+        window.localStorage.setItem(
+          HOLO_POSITION_KEY,
+          JSON.stringify(position),
+        );
+      } catch {
+        // Position persistence is a convenience, never a requirement.
+      }
     }
 
     function HoloIndicator(props) {
-      const { t, scope, sessionId } = props;
+      const { t, scope } = props;
       const tr = typeof t === 'function' ? t : (key) => key;
       const subscribe = React.useCallback(
         (listener) =>
@@ -671,57 +710,177 @@ window.__ModuleLoader__.load({
         value.holo_indicator && typeof value.holo_indicator === 'object'
           ? value.holo_indicator
           : {};
-      const indicatorEnabled = indicator.enabled !== false;
-      const style = normalizeHoloIndicatorStyle(indicator.style);
-      const active = holographic && indicatorEnabled;
-      const themeActive = active && style === 'theme';
+      const active = holographic && indicator.enabled !== false;
       const badgeRef = React.useRef(null);
+      const positionRef = React.useRef(null);
+      const customRef = React.useRef(false);
+      const dragRef = React.useRef(null);
+      const [position, setPosition] = React.useState(null);
+      const [dragging, setDragging] = React.useState(false);
+
+      const applyPosition = React.useCallback((next, custom) => {
+        positionRef.current = next;
+        customRef.current = custom;
+        setPosition(next);
+      }, []);
 
       React.useLayoutEffect(() => {
-        if (!themeActive) return undefined;
-        const anchor = badgeRef.current;
-        const host =
-          anchor?.closest?.('[data-conversation-region="chat"]') ??
-          anchor
-            ?.closest?.('[data-phase]')
-            ?.querySelector?.('[data-conversation-region="chat"]') ??
-          null;
-        if (!host) return undefined;
-        host.classList.add(HOLO_THEME_CLASS);
-        return () => {
-          host.classList.remove(HOLO_THEME_CLASS);
+        if (!active) return undefined;
+        const node = badgeRef.current;
+        if (!node) return undefined;
+        const saved = readHoloPosition();
+        if (saved) {
+          applyPosition(clampHoloPosition(saved.left, saved.top, node), true);
+        } else {
+          applyPosition(defaultHoloPosition(node), false);
+        }
+        return undefined;
+      }, [active, applyPosition]);
+
+      React.useEffect(() => {
+        if (!active) return undefined;
+        const onResize = () => {
+          const node = badgeRef.current;
+          if (!node) return;
+          const current = positionRef.current;
+          if (!current) return;
+          applyPosition(
+            customRef.current
+              ? clampHoloPosition(current.left, current.top, node)
+              : defaultHoloPosition(node),
+            customRef.current,
+          );
         };
-      }, [themeActive, sessionId, snapshot?.revision]);
+        window.addEventListener('resize', onResize);
+        const overlay = badgeRef.current?.closest?.('[data-shell-overlay]');
+        const observer =
+          typeof ResizeObserver !== 'undefined' && overlay
+            ? new ResizeObserver(onResize)
+            : null;
+        observer?.observe(overlay);
+        if (observer && badgeRef.current) observer.observe(badgeRef.current);
+        return () => {
+          window.removeEventListener('resize', onResize);
+          observer?.disconnect();
+        };
+      }, [active, applyPosition]);
+
+      const onPointerDown = (event) => {
+        if (event.button !== undefined && event.button !== 0) return;
+        const node = badgeRef.current;
+        if (!node) return;
+        event.preventDefault();
+        event.currentTarget.focus?.();
+        const start = positionRef.current ?? defaultHoloPosition(node);
+        positionRef.current = start;
+        dragRef.current = {
+          pointerId: event.pointerId,
+          startX: event.clientX,
+          startY: event.clientY,
+          originLeft: start.left,
+          originTop: start.top,
+        };
+        try {
+          event.currentTarget.setPointerCapture?.(event.pointerId);
+        } catch {
+          // Pointer capture is best-effort; the badge still moves on move.
+        }
+        setDragging(true);
+      };
+
+      const onPointerMove = (event) => {
+        const drag = dragRef.current;
+        const node = badgeRef.current;
+        if (!drag || !node || drag.pointerId !== event.pointerId) return;
+        event.preventDefault();
+        applyPosition(
+          clampHoloPosition(
+            drag.originLeft + event.clientX - drag.startX,
+            drag.originTop + event.clientY - drag.startY,
+            node,
+          ),
+          true,
+        );
+      };
+
+      const finishDrag = (event) => {
+        const drag = dragRef.current;
+        if (!drag) return;
+        dragRef.current = null;
+        setDragging(false);
+        try {
+          event.currentTarget.releasePointerCapture?.(drag.pointerId);
+        } catch {
+          // Ignore a capture already released by the browser.
+        }
+        if (positionRef.current) saveHoloPosition(positionRef.current);
+      };
+
+      const onKeyDown = (event) => {
+        const step = event.shiftKey ? 24 : 8;
+        let dx = 0;
+        let dy = 0;
+        if (event.key === 'ArrowLeft') dx = -step;
+        else if (event.key === 'ArrowRight') dx = step;
+        else if (event.key === 'ArrowUp') dy = -step;
+        else if (event.key === 'ArrowDown') dy = step;
+        if (!dx && !dy) return;
+        const node = badgeRef.current;
+        if (!node) return;
+        event.preventDefault();
+        const current = positionRef.current ?? defaultHoloPosition(node);
+        const next = clampHoloPosition(
+          current.left + dx,
+          current.top + dy,
+          node,
+        );
+        applyPosition(next, true);
+        saveHoloPosition(next);
+      };
 
       if (!active) return null;
+
+      const ariaLabel = `${tr('holoIndicatorAria')} ${tr('holoIndicatorDrag')}`;
 
       return h(
         React.Fragment,
         null,
         h('style', { key: 'dsh-dream-holo-css' }, HOLO_CSS),
         h(
-          'div',
-          { className: 'dsh-dream-holo-indicator-row' },
+          'span',
+          {
+            ref: badgeRef,
+            className: 'dsh-dream-holo-indicator',
+            role: 'status',
+            tabIndex: 0,
+            'aria-live': 'polite',
+            'aria-label': ariaLabel,
+            'aria-keyshortcuts': 'ArrowLeft ArrowRight ArrowUp ArrowDown',
+            title: ariaLabel,
+            'data-dsh-dream-holo-indicator': '',
+            'data-dragging': dragging ? 'true' : undefined,
+            style: position
+              ? {
+                  left: `${position.left}px`,
+                  top: `${position.top}px`,
+                  visibility: 'visible',
+                }
+              : { left: '0px', top: '0px', visibility: 'hidden' },
+            onPointerDown,
+            onPointerMove,
+            onPointerUp: finishDrag,
+            onPointerCancel: finishDrag,
+            onLostPointerCapture: finishDrag,
+            onKeyDown,
+          },
+          h('span', {
+            className: 'dsh-dream-holo-indicator-dot',
+            'aria-hidden': true,
+          }),
           h(
             'span',
-            {
-              ref: badgeRef,
-              className: 'dsh-dream-holo-indicator',
-              role: 'status',
-              'aria-live': 'polite',
-              'aria-label': tr('holoIndicatorAria'),
-              title: tr('holoIndicatorAria'),
-              'data-dsh-dream-holo-indicator': '',
-            },
-            h('span', {
-              className: 'dsh-dream-holo-indicator-dot',
-              'aria-hidden': true,
-            }),
-            h(
-              'span',
-              { className: 'dsh-dream-holo-indicator-text' },
-              tr('holoIndicatorOn'),
-            ),
+            { className: 'dsh-dream-holo-indicator-text' },
+            tr('holoIndicatorOn'),
           ),
         ),
       );
@@ -784,7 +943,6 @@ window.__ModuleLoader__.load({
         autoRebuild: current.auto_rebuild_collection !== false,
         holographic: current.holographic_mode === true,
         holoIndicatorEnabled: holoIndicator.enabled !== false,
-        holoIndicatorStyle: normalizeHoloIndicatorStyle(holoIndicator.style),
         routerEnabled: flat('router_enabled', router.enabled) !== false,
         routerMode: normalizeRouterMode(flat('router_mode', router.mode)),
         routerCloudBaseUrl: String(
@@ -842,9 +1000,6 @@ window.__ModuleLoader__.load({
         autoRecall: Boolean(draft.autoRecall),
         holographic: Boolean(draft.holographic),
         holoIndicatorEnabled: draft.holoIndicatorEnabled !== false,
-        holoIndicatorStyle: normalizeHoloIndicatorStyle(
-          draft.holoIndicatorStyle,
-        ),
         routerEnabled: Boolean(draft.routerEnabled),
         routerMode: normalizeRouterMode(draft.routerMode),
         routerBaseUrl,
@@ -1075,7 +1230,6 @@ window.__ModuleLoader__.load({
           holographic_mode: parsed.holographic,
           holo_indicator: {
             enabled: parsed.holoIndicatorEnabled,
-            style: parsed.holoIndicatorStyle,
           },
           // Router fields stay flat here; the Host assembles the nested
           // `router` block and preserves any advanced setting the page did
@@ -1163,7 +1317,6 @@ window.__ModuleLoader__.load({
                 path: ['holo_indicator'],
                 value: {
                   enabled: parsed.holoIndicatorEnabled,
-                  style: parsed.holoIndicatorStyle,
                 },
               },
               {
@@ -1277,20 +1430,6 @@ window.__ModuleLoader__.load({
                 label: tr('holoIndicator'),
                 onChange: (value) => edit({ holoIndicatorEnabled: value }),
               }),
-              h(
-                'select',
-                {
-                  className: 'am-input am-select',
-                  value: draft.holoIndicatorStyle,
-                  disabled: disabled || !draft.holoIndicatorEnabled,
-                  'aria-label': tr('holoIndicatorStyle'),
-                  title: tr('holoIndicatorStyle'),
-                  onChange: (event) =>
-                    edit({ holoIndicatorStyle: event.target.value }),
-                },
-                h('option', { value: 'badge' }, tr('holoStyleBadge')),
-                h('option', { value: 'theme' }, tr('holoStyleTheme')),
-              ),
             ),
             h('div', { className: 'am-hint' }, tr('holoIndicatorHint')),
           ),
@@ -1858,15 +1997,16 @@ window.__ModuleLoader__.load({
       );
 
       // The badge reads the same live ConfigForm snapshot as the settings page
-      // (the `dsh-dream-settings` entry, with its revision). It registers
-      // unconditionally and renders null while holographic mode or the
-      // indicator is off, so the pre-feature interface is preserved exactly.
+      // (the `dsh-dream-settings` entry, with its revision). It registers in the
+      // frame-wide overlay so it can float and be dragged; it renders null while
+      // holographic mode or the indicator is off, so the pre-feature interface
+      // is preserved exactly.
       ctx.effect(
         () =>
-          ctx.slots.inject('conversation.input.dock', () =>
+          ctx.slots.inject('shell.overlay', () =>
             ctx.slots.register(
               {
-                name: 'conversation.input.dock',
+                name: 'shell.overlay',
                 id: 'dsh-dream-holo-indicator',
                 order: 10,
                 locale: NS,
