@@ -77,6 +77,15 @@ window.__ModuleLoader__.load({
       holographicHint:
         'When enabled, every turn writes the complete User and Assistant originals to the vector store, no matter what the conversation is about. Nothing is omitted.',
       holographicBadge: 'FORCE MEMORY',
+      holoIndicator: 'Show holographic indicator',
+      holoIndicatorHint:
+        'A UI hint only — not the holographic switch. Hiding it does not stop recording.',
+      holoIndicatorStyle: 'Indicator style',
+      holoStyleBadge: 'badge (dot only)',
+      holoStyleTheme: 'theme (white background, black text)',
+      holoIndicatorOn: 'HOLO · RECORDING',
+      holoIndicatorAria:
+        'Holographic mode is on. Every turn is being written to long-term memory.',
       routerTitle: 'Smart routing (Router)',
       routerEnabled: 'Smart intent cutoff',
       routerEnabledHint:
@@ -187,6 +196,15 @@ window.__ModuleLoader__.load({
       holographicHint:
         '开启后，无论对话内容如何，每轮对话的 User 和 Assistant 原话都会被强制写入向量库，绝不遗漏。',
       holographicBadge: '强制记忆',
+      holoIndicator: '显示全息提示',
+      holoIndicatorHint:
+        '这只是界面提示，不是全息开关；关闭提示不会停止落库。',
+      holoIndicatorStyle: '提示样式',
+      holoStyleBadge: 'badge（小灯）',
+      holoStyleTheme: 'theme（白底黑字）',
+      holoIndicatorOn: '全息 · 落库中',
+      holoIndicatorAria:
+        '全息模式已开启，每轮对话都会自动写入长期记忆。',
       routerTitle: '智能路由（Router）',
       routerEnabled: '智能意图截断',
       routerEnabledHint:
@@ -420,6 +438,24 @@ window.__ModuleLoader__.load({
         vertical-align: 1px;
       }
       .am-holo .am-label { font-weight: 700; }
+      .am-holo-indicator {
+        display: flex;
+        flex-wrap: wrap;
+        align-items: center;
+        gap: 8px;
+        margin-top: 10px;
+        padding-top: 10px;
+        border-top: 0.5px dashed var(--dsw-alias-border-l3);
+      }
+      .am-holo-indicator-label {
+        color: var(--dsw-alias-label-primary);
+        font-weight: 500;
+      }
+      .am-holo-indicator .am-select {
+        width: 210px;
+        max-width: 100%;
+        height: 30px;
+      }
       .am-warning {
         margin: 16px 0 10px;
         color: var(--dsw-alias-state-error-primary, #f85149);
@@ -510,6 +546,187 @@ window.__ModuleLoader__.load({
       }
     `;
 
+    /*
+     * Holographic indicator (chat surface).
+     *
+     * The badge lives in `conversation.input.dock` (just above the composer),
+     * and the `theme` variant adds one class to the chat container. The class
+     * defines chat-local CSS variables only; it never touches `document.body`,
+     * `:root`, or the skin's global theme variables. Removing the class removes
+     * every variable it introduced, so exit is clean.
+     */
+    const HOLO_THEME_CLASS = 'dsh-dream-holo-theme';
+
+    const HOLO_CSS = `
+      .dsh-dream-holo-indicator-row {
+        display: flex;
+        align-items: center;
+        justify-content: flex-end;
+        padding: 0 2px;
+        pointer-events: none;
+      }
+      .dsh-dream-holo-indicator {
+        display: inline-flex;
+        align-items: center;
+        gap: 6px;
+        padding: 2px 8px;
+        border: 0.5px solid var(--dsw-alias-border-l3, rgba(128, 128, 128, 0.45));
+        border-radius: 999px;
+        background: color-mix(
+          in srgb,
+          var(--dsw-alias-bg-base, #808080) 84%,
+          transparent
+        );
+        color: var(--dsw-alias-label-secondary, #666666);
+        font-size: 11px;
+        line-height: 16px;
+        font-weight: 600;
+        letter-spacing: 0.02em;
+        white-space: nowrap;
+        user-select: none;
+      }
+      .dsh-dream-holo-indicator-dot {
+        flex: none;
+        width: 7px;
+        height: 7px;
+        border-radius: 50%;
+        background: #ff453a;
+        box-shadow:
+          0 0 0 1px #ffffff,
+          0 0 0 2px rgba(0, 0, 0, 0.55);
+      }
+      .dsh-dream-holo-theme {
+        --dsh-dream-holo-bg: #ffffff;
+        --dsh-dream-holo-fg: #111111;
+        --dsh-dream-holo-fg-muted: #4a4a4a;
+        --dsh-dream-holo-fill: #f5f5f5;
+        --dsh-dream-holo-line: rgba(17, 17, 17, 0.14);
+
+        background-color: var(--dsh-dream-holo-bg);
+        color: var(--dsh-dream-holo-fg);
+
+        /* Chat-local remap: the skin's global rules stay untouched. */
+        --dsw-alias-bg-base: var(--dsh-dream-holo-bg);
+        --dsw-alias-bg-layer-1: var(--dsh-dream-holo-bg);
+        --dsw-alias-bg-layer-2: var(--dsh-dream-holo-fill);
+        --dsw-alias-bg-layer-3: #eeeeee;
+        --dsw-alias-bg-module-platform: var(--dsh-dream-holo-fill);
+        --dsw-alias-label-primary: var(--dsh-dream-holo-fg);
+        --dsw-alias-label-primary-bluish: var(--dsh-dream-holo-fg);
+        --dsw-alias-label-primary-dimmed: var(--dsh-dream-holo-fg-muted);
+        --dsw-alias-label-secondary: var(--dsh-dream-holo-fg-muted);
+        --dsw-alias-label-tertiary: #5c5c5c;
+        --dsw-alias-label-caption: #666666;
+        --dsw-alias-label-dimmed: #777777;
+        --dsw-alias-border-l1: #ececec;
+        --dsw-alias-border-l2: #e0e0e0;
+        --dsw-alias-border-l3: #cfcfcf;
+        --dsw-alias-border-l4: #bdbdbd;
+        --dsw-alias-interactive-bg-hover: var(--dsh-dream-holo-line);
+        --dsw-alias-interactive-bg-hover-solid: #f0f0f0;
+        --dsw-alias-interactive-bg-active: rgba(0, 0, 0, 0.1);
+        --dsw-alias-scrollbar-bg-l1: rgba(0, 0, 0, 0.14);
+        --dsw-alias-scrollbar-bg-l2: rgba(0, 0, 0, 0.2);
+        --dsw-alias-scrollbar-hover-l2: rgba(0, 0, 0, 0.3);
+        --dsw-specific-input-major: var(--dsh-dream-holo-bg);
+        --dsw-specific-selector: var(--dsh-dream-holo-fill);
+        --dsw-specific-menu: var(--dsh-dream-holo-bg);
+        --dsw-elevation-stroke-color: var(--dsh-dream-holo-line);
+        --dsw-elevation-soft: 0 2px 8px rgba(0, 0, 0, 0.06);
+        --dsw-elevation-panel: 0 8px 24px rgba(0, 0, 0, 0.08);
+        --dsw-elevation-prominent: 0 16px 40px rgba(0, 0, 0, 0.12);
+      }
+    `;
+
+    const EMPTY_HOLO_SNAPSHOT = { status: 'unavailable', value: {} };
+
+    function normalizeHoloIndicatorStyle(value) {
+      return value === 'theme' ? 'theme' : 'badge';
+    }
+
+    function HoloIndicator(props) {
+      const { t, scope, sessionId } = props;
+      const tr = typeof t === 'function' ? t : (key) => key;
+      const subscribe = React.useCallback(
+        (listener) =>
+          scope && typeof scope.subscribe === 'function'
+            ? scope.subscribe(listener)
+            : () => {},
+        [scope],
+      );
+      const getSnapshot = React.useCallback(
+        () =>
+          scope && typeof scope.getSnapshot === 'function'
+            ? scope.getSnapshot()
+            : EMPTY_HOLO_SNAPSHOT,
+        [scope],
+      );
+      const snapshot = React.useSyncExternalStore(subscribe, getSnapshot);
+      const value =
+        snapshot && snapshot.value && typeof snapshot.value === 'object'
+          ? snapshot.value
+          : {};
+      const holographic = value.holographic_mode === true;
+      const indicator =
+        value.holo_indicator && typeof value.holo_indicator === 'object'
+          ? value.holo_indicator
+          : {};
+      const indicatorEnabled = indicator.enabled !== false;
+      const style = normalizeHoloIndicatorStyle(indicator.style);
+      const active = holographic && indicatorEnabled;
+      const themeActive = active && style === 'theme';
+      const badgeRef = React.useRef(null);
+
+      React.useLayoutEffect(() => {
+        if (!themeActive) return undefined;
+        const anchor = badgeRef.current;
+        const host =
+          anchor?.closest?.('[data-conversation-region="chat"]') ??
+          anchor
+            ?.closest?.('[data-phase]')
+            ?.querySelector?.('[data-conversation-region="chat"]') ??
+          null;
+        if (!host) return undefined;
+        host.classList.add(HOLO_THEME_CLASS);
+        return () => {
+          host.classList.remove(HOLO_THEME_CLASS);
+        };
+      }, [themeActive, sessionId, snapshot?.revision]);
+
+      if (!active) return null;
+
+      return h(
+        React.Fragment,
+        null,
+        h('style', { key: 'dsh-dream-holo-css' }, HOLO_CSS),
+        h(
+          'div',
+          { className: 'dsh-dream-holo-indicator-row' },
+          h(
+            'span',
+            {
+              ref: badgeRef,
+              className: 'dsh-dream-holo-indicator',
+              role: 'status',
+              'aria-live': 'polite',
+              'aria-label': tr('holoIndicatorAria'),
+              title: tr('holoIndicatorAria'),
+              'data-dsh-dream-holo-indicator': '',
+            },
+            h('span', {
+              className: 'dsh-dream-holo-indicator-dot',
+              'aria-hidden': true,
+            }),
+            h(
+              'span',
+              { className: 'dsh-dream-holo-indicator-text' },
+              tr('holoIndicatorOn'),
+            ),
+          ),
+        ),
+      );
+    }
+
     function normalizeRouterMode(value) {
       const text = String(value ?? 'auto')
         .trim()
@@ -525,6 +742,10 @@ window.__ModuleLoader__.load({
           : {};
       const cloud =
         router.cloud && typeof router.cloud === 'object' ? router.cloud : {};
+      const holoIndicator =
+        current.holo_indicator && typeof current.holo_indicator === 'object'
+          ? current.holo_indicator
+          : {};
       const activeProvider = String(cloud.active ?? '');
       const providerConfig =
         activeProvider &&
@@ -562,6 +783,8 @@ window.__ModuleLoader__.load({
         embeddingBaseUrl: String(current.embedding_base_url ?? ''),
         autoRebuild: current.auto_rebuild_collection !== false,
         holographic: current.holographic_mode === true,
+        holoIndicatorEnabled: holoIndicator.enabled !== false,
+        holoIndicatorStyle: normalizeHoloIndicatorStyle(holoIndicator.style),
         routerEnabled: flat('router_enabled', router.enabled) !== false,
         routerMode: normalizeRouterMode(flat('router_mode', router.mode)),
         routerCloudBaseUrl: String(
@@ -618,6 +841,10 @@ window.__ModuleLoader__.load({
         autoRebuild: Boolean(draft.autoRebuild),
         autoRecall: Boolean(draft.autoRecall),
         holographic: Boolean(draft.holographic),
+        holoIndicatorEnabled: draft.holoIndicatorEnabled !== false,
+        holoIndicatorStyle: normalizeHoloIndicatorStyle(
+          draft.holoIndicatorStyle,
+        ),
         routerEnabled: Boolean(draft.routerEnabled),
         routerMode: normalizeRouterMode(draft.routerMode),
         routerBaseUrl,
@@ -846,6 +1073,10 @@ window.__ModuleLoader__.load({
           embedding_base_url: parsed.baseUrl,
           auto_rebuild_collection: parsed.autoRebuild,
           holographic_mode: parsed.holographic,
+          holo_indicator: {
+            enabled: parsed.holoIndicatorEnabled,
+            style: parsed.holoIndicatorStyle,
+          },
           // Router fields stay flat here; the Host assembles the nested
           // `router` block and preserves any advanced setting the page did
           // not render (budget, threshold, circuit, audit).
@@ -926,6 +1157,14 @@ window.__ModuleLoader__.load({
                 op: 'set',
                 path: ['holographic_mode'],
                 value: parsed.holographic,
+              },
+              {
+                op: 'set',
+                path: ['holo_indicator'],
+                value: {
+                  enabled: parsed.holoIndicatorEnabled,
+                  style: parsed.holoIndicatorStyle,
+                },
               },
               {
                 op: 'set',
@@ -1024,6 +1263,36 @@ window.__ModuleLoader__.load({
               h('span', { className: 'am-holo-badge' }, tr('holographicBadge')),
             ),
             h('div', { className: 'am-hint' }, tr('holographicHint')),
+            h(
+              'div',
+              { className: 'am-holo-indicator' },
+              h(
+                'span',
+                { className: 'am-holo-indicator-label' },
+                tr('holoIndicator'),
+              ),
+              h(Toggle, {
+                checked: draft.holoIndicatorEnabled,
+                disabled,
+                label: tr('holoIndicator'),
+                onChange: (value) => edit({ holoIndicatorEnabled: value }),
+              }),
+              h(
+                'select',
+                {
+                  className: 'am-input am-select',
+                  value: draft.holoIndicatorStyle,
+                  disabled: disabled || !draft.holoIndicatorEnabled,
+                  'aria-label': tr('holoIndicatorStyle'),
+                  title: tr('holoIndicatorStyle'),
+                  onChange: (event) =>
+                    edit({ holoIndicatorStyle: event.target.value }),
+                },
+                h('option', { value: 'badge' }, tr('holoStyleBadge')),
+                h('option', { value: 'theme' }, tr('holoStyleTheme')),
+              ),
+            ),
+            h('div', { className: 'am-hint' }, tr('holoIndicatorHint')),
           ),
           h(Toggle, {
             checked: draft.holographic,
@@ -1586,6 +1855,27 @@ window.__ModuleLoader__.load({
             ),
           ),
         'DSH-DREAM: settings section',
+      );
+
+      // The badge reads the same live ConfigForm snapshot as the settings page
+      // (the `dsh-dream-settings` entry, with its revision). It registers
+      // unconditionally and renders null while holographic mode or the
+      // indicator is off, so the pre-feature interface is preserved exactly.
+      ctx.effect(
+        () =>
+          ctx.slots.inject('conversation.input.dock', () =>
+            ctx.slots.register(
+              {
+                name: 'conversation.input.dock',
+                id: 'dsh-dream-holo-indicator',
+                order: 10,
+                locale: NS,
+                inject: () => ({ scope }),
+              },
+              HoloIndicator,
+            ),
+          ),
+        'DSH-DREAM: holographic indicator',
       );
     }
 

@@ -10,6 +10,7 @@
 
 import assert from "node:assert/strict";
 import {
+  normalizeHoloIndicator,
   normalizePayload,
   normalizeRouterPayload,
   redactPayload,
@@ -219,6 +220,63 @@ test("volatile reference values are unwrapped", () => {
   assert.equal(payload.max_window_tokens, 2048);
   assert.equal(payload.router.enabled, false);
   assert.equal(payload.router.mode, "local");
+});
+
+test("legacy configs default the holo indicator to enabled badge", () => {
+  const payload = normalizePayload({
+    enable_memory: true,
+    holographic_mode: true,
+  });
+  assert.deepEqual(payload.holo_indicator, { enabled: true, style: "badge" });
+  assert.deepEqual(normalizeHoloIndicator(undefined), {
+    enabled: true,
+    style: "badge",
+  });
+});
+
+test("holo indicator passes through enabled/style and validates style", () => {
+  const payload = normalizePayload(
+    {
+      holographic_mode: true,
+      holo_indicator: { enabled: false, style: "theme" },
+    },
+    previous,
+  );
+  assert.deepEqual(payload.holo_indicator, { enabled: false, style: "theme" });
+  assert.equal(payload.holographic_mode, true);
+
+  const invalid = normalizePayload(
+    { holo_indicator: { enabled: true, style: "rainbow" } },
+    previous,
+  );
+  assert.deepEqual(invalid.holo_indicator, { enabled: true, style: "badge" });
+  assert.equal(invalid.holographic_mode, false);
+});
+
+test("partial holo indicator payload preserves the previous style", () => {
+  const previousWithIndicator = {
+    ...previous,
+    holo_indicator: { enabled: false, style: "theme" },
+  };
+  const payload = normalizePayload(
+    { holo_indicator: { enabled: true } },
+    previousWithIndicator,
+  );
+  assert.deepEqual(payload.holo_indicator, { enabled: true, style: "theme" });
+});
+
+test("holo indicator values unwrap volatile references", () => {
+  const ref = (value) => ({ get: () => value });
+  const payload = normalizePayload(
+    {
+      holo_indicator: ref({
+        enabled: ref(false),
+        style: ref("theme"),
+      }),
+    },
+    previous,
+  );
+  assert.deepEqual(payload.holo_indicator, { enabled: false, style: "theme" });
 });
 
 test("redactPayload never leaks the embedding key", () => {

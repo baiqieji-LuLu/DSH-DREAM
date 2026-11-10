@@ -60,6 +60,9 @@ of your DSH build). Turn on:
 - **Holographic mode (forced full memory)** if you want every turn persisted, not only turns
   where the model extracted a fact.
 
+The on-screen **HOLO · RECORDING** badge is only a **hint** (controlled separately by
+`holo_indicator`), not the switch; hiding it does not stop recording.
+
 Click **Save**, then send a test message. The first retrieval may take a few seconds while
 the local vector database and embedding model are initialized.
 

@@ -25,10 +25,13 @@ const clientPath = fileURLToPath(
 const source = readFileSync(clientPath, "utf8");
 
 const fakeReact = {
+  Fragment: Symbol("Fragment"),
   createElement: () => null,
   useState: () => [null, () => {}],
   useEffect: () => {},
+  useLayoutEffect: () => {},
   useCallback: (fn) => fn,
+  useRef: () => ({ current: null }),
   useSyncExternalStore: () => ({ status: "ready", value: {} }),
 };
 
@@ -57,6 +60,7 @@ assert.equal(Array.isArray(exported.inject), true);
 assert.equal(typeof exported.apply, "function");
 
 const registered = {};
+const slotRegistrations = [];
 let section = null;
 const ctx = {
   effect: (fn) => fn(),
@@ -74,7 +78,8 @@ const ctx = {
   slots: {
     inject: (_name, callback) => callback(),
     register: (meta, component) => {
-      section = { meta, component };
+      slotRegistrations.push({ meta, component });
+      if (meta.name === "settings.section") section = { meta, component };
       return () => {};
     },
   },
@@ -87,6 +92,21 @@ assert.ok(dictionaries.zh && dictionaries.en, "zh/en dictionaries missing");
 assert.ok(section, "settings.section was not registered");
 assert.equal(section.meta.id, "DSH-DREAM");
 
+const indicatorRegistration = slotRegistrations.find(
+  (entry) => entry.meta.name === "conversation.input.dock",
+);
+assert.ok(
+  indicatorRegistration,
+  "conversation.input.dock indicator was not registered",
+);
+assert.equal(indicatorRegistration.meta.id, "dsh-dream-holo-indicator");
+assert.equal(
+  indicatorRegistration.meta.locale,
+  "settings.agentMemory",
+  "indicator must reuse the existing zh/en dictionary",
+);
+assert.equal(typeof indicatorRegistration.component, "function");
+
 const usedKeys = new Set();
 for (const match of source.matchAll(/tr\('([^']+)'\)/g)) usedKeys.add(match[1]);
 usedKeys.add("nav"); // used through `t('nav')` in apply()
@@ -94,6 +114,30 @@ const missingZh = [...usedKeys].filter((key) => !(key in dictionaries.zh));
 const missingEn = [...usedKeys].filter((key) => !(key in dictionaries.en));
 assert.deepEqual(missingZh, [], `missing zh keys: ${missingZh.join(", ")}`);
 assert.deepEqual(missingEn, [], `missing en keys: ${missingEn.join(", ")}`);
+
+// --- Holographic indicator copy / payload --------------------------------
+assert.equal(dictionaries.zh.holoIndicatorOn, "全息 · 落库中");
+assert.equal(dictionaries.en.holoIndicatorOn, "HOLO · RECORDING");
+assert.equal(dictionaries.zh.holoStyleBadge, "badge（小灯）");
+assert.equal(dictionaries.zh.holoStyleTheme, "theme（白底黑字）");
+assert.match(dictionaries.zh.holoIndicatorHint, /不是全息开关/);
+assert.match(dictionaries.en.holoIndicatorHint, /not the holographic switch/i);
+assert.ok(
+  source.includes("holo_indicator: {"),
+  "save payload is missing holo_indicator",
+);
+assert.ok(
+  source.includes("path: ['holo_indicator']"),
+  "settings mutation is missing holo_indicator",
+);
+assert.ok(
+  source.includes('.dsh-dream-holo-theme'),
+  "theme class is missing",
+);
+assert.ok(
+  source.includes('[data-conversation-region="chat"]'),
+  "theme is not scoped to the chat container",
+);
 
 // --- Required plain-language copy ---------------------------------------
 assert.equal(dictionaries.zh.routerTitle, "智能路由（Router）");

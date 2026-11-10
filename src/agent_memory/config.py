@@ -71,6 +71,8 @@ DEFAULT_EMBEDDING_PROVIDER: Final[str] = "local"
 DEFAULT_EMBEDDING_MODEL: Final[str] = ""
 DEFAULT_EMBEDDING_API_KEY: Final[str] = ""
 DEFAULT_EMBEDDING_BASE_URL: Final[str] = ""
+DEFAULT_HOLO_INDICATOR_ENABLED: Final[bool] = True
+DEFAULT_HOLO_INDICATOR_STYLE: Final[str] = "badge"
 
 # --- RouterEngine defaults (v0.4.0) ---------------------------------------
 #
@@ -340,6 +342,27 @@ def parse_router_config(merged: Mapping[str, Any]) -> RouterConfig:
 
 
 @dataclass(frozen=True, slots=True)
+class HoloIndicatorConfig:
+    """UI-only holographic indicator settings.
+
+    This block never controls whether a turn is written; it only tells the web
+    client whether to show the on-screen hint and which visual variant to use.
+    The Python side tolerates the key so an old/new bridge file can always be
+    loaded, even though the backend itself never renders anything.
+
+    中文说明：全息提示的界面配置。它不控制是否落库，只决定前端是否显示提示
+    以及提示样式；Python 端即使不渲染，也必须能容忍该键。
+    """
+
+    enabled: bool = DEFAULT_HOLO_INDICATOR_ENABLED
+    style: str = DEFAULT_HOLO_INDICATOR_STYLE
+
+    def to_dict(self) -> dict[str, Any]:
+        """Return the JSON-safe nested indicator block."""
+        return {"enabled": self.enabled, "style": self.style}
+
+
+@dataclass(frozen=True, slots=True)
 class MemoryConfig:
     """Validated runtime configuration for the memory plugin.
 
@@ -367,6 +390,9 @@ class MemoryConfig:
     embedding_base_url: str = DEFAULT_EMBEDDING_BASE_URL
     auto_rebuild_collection: bool = True
     holographic_mode: bool = False
+    holo_indicator: HoloIndicatorConfig = field(
+        default_factory=HoloIndicatorConfig
+    )
     router: RouterConfig = field(default_factory=RouterConfig)
 
     def to_dict(self) -> dict[str, Any]:
@@ -388,6 +414,7 @@ class MemoryConfig:
             "embedding_base_url": self.embedding_base_url,
             "auto_rebuild_collection": self.auto_rebuild_collection,
             "holographic_mode": self.holographic_mode,
+            "holo_indicator": self.holo_indicator.to_dict(),
             "router": self.router.to_dict(),
         }
 
@@ -514,6 +541,31 @@ def _coerce_embedding_engine(value: object) -> str:
     return text
 
 
+def _coerce_holo_indicator(value: Any) -> HoloIndicatorConfig:
+    """Tolerate a missing or partially invalid ``holo_indicator`` block.
+
+    The Python side never renders the indicator, but reading an old bridge file
+    (or one written by a newer UI) must not fail or reset unrelated fields.
+
+    中文说明：容忍缺失或部分非法的 ``holo_indicator`` 块；Python 端不渲染提示，
+    但旧/新桥接文件都必须能正常读取，且不影响其他字段。
+    """
+    if isinstance(value, Mapping):
+        style = _coerce_choice(
+            value.get("style"),
+            DEFAULT_HOLO_INDICATOR_STYLE,
+            ("badge", "theme"),
+        )
+        return HoloIndicatorConfig(
+            enabled=_coerce_bool(
+                value.get("enabled"),
+                DEFAULT_HOLO_INDICATOR_ENABLED,
+            ),
+            style=style,
+        )
+    return HoloIndicatorConfig()
+
+
 def load_config(config_path: str | Path | None = None) -> MemoryConfig:
     """Load and validate the effective memory configuration.
 
@@ -600,6 +652,7 @@ def load_config(config_path: str | Path | None = None) -> MemoryConfig:
             merged.get("holographic_mode"),
             False,
         ),
+        holo_indicator=_coerce_holo_indicator(merged.get("holo_indicator")),
         # Read router settings from the bridge file only: manifest UI defaults
         # are flat `router_*` keys that must not shadow a nested `router` block.
         router=parse_router_config(bridge_values),
@@ -622,6 +675,8 @@ __all__ = (
     "DEFAULT_EMBEDDING_BASE_URL",
     "DEFAULT_EMBEDDING_MODEL",
     "DEFAULT_EMBEDDING_PROVIDER",
+    "DEFAULT_HOLO_INDICATOR_ENABLED",
+    "DEFAULT_HOLO_INDICATOR_STYLE",
     "DEFAULT_MAX_WINDOW_TOKENS",
     "DEFAULT_RAG_PATH",
     "DEFAULT_RETRIEVAL_TOP_K",
@@ -636,6 +691,7 @@ __all__ = (
     "MANIFEST_PATH",
     "MAX_TOP_K",
     "MAX_WINDOW_TOKENS",
+    "HoloIndicatorConfig",
     "MemoryConfig",
     "PROJECT_ROOT",
     "ROUTER_DECISIONS",

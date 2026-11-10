@@ -30,6 +30,46 @@ const CLOUD_FLAT_KEYS = [
 ];
 
 /**
+ * UI-only holographic indicator defaults.
+ *
+ * `enabled` is the interface master switch; `style` selects the visual
+ * variant. Neither value participates in the write decision.
+ */
+export const HOLO_INDICATOR_DEFAULT = Object.freeze({
+  enabled: true,
+  style: "badge",
+});
+
+/**
+ * Normalize the nested `holo_indicator` block from the Config form, the
+ * settings descriptor, or the bridge file. A missing block (old config) and an
+ * unknown style both fall back to the documented defaults.
+ *
+ * @param {unknown} value Raw indicator value (possibly a volatile reference).
+ * @param {unknown} [previous] Previously normalized indicator block.
+ * @returns {{ enabled: boolean, style: "badge" | "theme" }}
+ */
+export function normalizeHoloIndicator(value, previous = null) {
+  const currentValue = current(value);
+  const previousValue = current(previous);
+  const source =
+    currentValue && typeof currentValue === "object" ? currentValue : {};
+  const fallback =
+    previousValue && typeof previousValue === "object" ? previousValue : {};
+  const enabled = current(source.enabled ?? fallback.enabled);
+  const style = String(current(source.style ?? fallback.style) ?? "")
+    .trim()
+    .toLowerCase();
+  return {
+    enabled:
+      enabled === undefined || enabled === null
+        ? HOLO_INDICATOR_DEFAULT.enabled
+        : Boolean(enabled),
+    style: style === "theme" ? "theme" : HOLO_INDICATOR_DEFAULT.style,
+  };
+}
+
+/**
  * Assemble the nested `router` block from flat `router_*` fields.
  *
  * @param {object} value Raw form/config value.
@@ -199,6 +239,13 @@ export function normalizePayload(raw, previous = null) {
       current(value.auto_rebuild_collection) ?? true,
     ),
     holographic_mode: Boolean(current(value.holographic_mode) ?? false),
+    // The indicator is a separate, UI-only switch: it must never be confused
+    // with `holographic_mode`, and a legacy payload without the block keeps
+    // the documented defaults.
+    holo_indicator: normalizeHoloIndicator(
+      value.holo_indicator,
+      previous?.holo_indicator,
+    ),
     router: normalizeRouterPayload(value, previous),
   };
 }

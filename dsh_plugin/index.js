@@ -245,6 +245,31 @@ export const Config = z.object({
     )
     .volatile(),
 
+  // UI-only companion to `holographic_mode`: it shows a badge in the chat
+  // area and can optionally tint that area, but it never changes what is
+  // written. Disabling it must leave the interface exactly as it was before
+  // this feature existed.
+  holo_indicator: z
+    .object({
+      enabled: z
+        .boolean()
+        .default(true)
+        .description(
+          "Show the holographic recording indicator. This is a hint only, not the write switch.",
+        ),
+      style: z
+        .union([z.const("badge"), z.const("theme")])
+        .default("badge")
+        .description(
+          "badge shows only the small dot and label; theme also turns the chat container into white background with black text.",
+        ),
+    })
+    .default({ enabled: true, style: "badge" })
+    .description(
+      "Visual hint for holographic mode. It does not control memory writes.",
+    )
+    .volatile(),
+
   // --- RouterEngine (v0.4.0) ---------------------------------------------
   // The RouterEngine only decides whether a turn needs long-term memory; it
   // never generates dialogue text. `router_enabled=false` restores the exact

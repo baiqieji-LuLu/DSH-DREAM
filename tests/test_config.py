@@ -156,6 +156,72 @@ def test_embedding_bridge_values_are_trimmed() -> None:
         bridge.unlink(missing_ok=True)
 
 
+def test_holo_indicator_is_tolerated_and_preserved() -> None:
+    bridge = _bridge_path("holo-indicator")
+    try:
+        bridge.write_text(
+            json.dumps(
+                {
+                    "rag_path": str((TEST_TMP_ROOT / "holo-db").resolve()),
+                    "holo_indicator": {
+                        "enabled": False,
+                        "style": "theme",
+                        "unknown": "ignored",
+                    },
+                }
+            ),
+            encoding="utf-8",
+        )
+        config = load_config(bridge)
+        assert config.holo_indicator.enabled is False
+        assert config.holo_indicator.style == "theme"
+        assert config.to_dict()["holo_indicator"] == {
+            "enabled": False,
+            "style": "theme",
+        }
+    finally:
+        bridge.unlink(missing_ok=True)
+
+
+def test_legacy_config_defaults_holo_indicator() -> None:
+    bridge = _bridge_path("holo-indicator-legacy")
+    try:
+        bridge.write_text(
+            json.dumps(
+                {
+                    "rag_path": str((TEST_TMP_ROOT / "holo-legacy-db").resolve()),
+                    "holographic_mode": True,
+                }
+            ),
+            encoding="utf-8",
+        )
+        config = load_config(bridge)
+        assert config.holographic_mode is True
+        assert config.holo_indicator.enabled is True
+        assert config.holo_indicator.style == "badge"
+    finally:
+        bridge.unlink(missing_ok=True)
+
+
+def test_invalid_holo_indicator_falls_back_to_defaults() -> None:
+    bridge = _bridge_path("holo-indicator-invalid")
+    try:
+        bridge.write_text(
+            json.dumps(
+                {
+                    "rag_path": str((TEST_TMP_ROOT / "holo-invalid-db").resolve()),
+                    "holo_indicator": {"enabled": "not-a-bool", "style": "neon"},
+                }
+            ),
+            encoding="utf-8",
+        )
+        config = load_config(bridge)
+        assert config.holo_indicator.enabled is True
+        assert config.holo_indicator.style == "badge"
+    finally:
+        bridge.unlink(missing_ok=True)
+
+
 def test_invalid_bridge_json_raises() -> None:
     bridge = _bridge_path("broken")
     try:
