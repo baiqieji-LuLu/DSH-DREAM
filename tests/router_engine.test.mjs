@@ -10,12 +10,23 @@
 
 import assert from "node:assert/strict";
 import {
+  existsSync,
+  mkdirSync,
+  readFileSync,
+  rmSync,
+  statSync,
+  writeFileSync,
+} from "node:fs";
+import { join, resolve } from "node:path";
+import { fileURLToPath } from "node:url";
+import {
   CircuitBreaker,
   RouteCache,
   RouterAudit,
   createRouterEngine,
   hashQuery,
   normalizeRouterConfig,
+  resolveAuditPath,
 } from "../dsh_plugin/router_engine.js";
 import {
   EXPLICIT,
@@ -370,6 +381,149 @@ test("an already-aborted signal yields a cancelled result", async () => {
   const result = await engine.route({ query: "上次那个方案", signal: controller.signal });
   assert.equal(result.cancelled, true);
   assert.equal(local.calls.length, 0);
+});
+
+const TEST_TMP = fileURLToPath(new URL("../.test-tmp/", import.meta.url));
+
+function auditDir(label) {
+  const dir = join(
+    TEST_TMP,
+    `audit-${label}-${process.pid}-${Date.now()}-${Math.random().toString(16).slice(2)}`,
+  );
+  mkdirSync(dir, { recursive: true });
+  return dir;
+}
+
+test("audit path is the documented ~/.dsh/dream/router.jsonl", () => {
+  const path = resolveAuditPath({ env: {}, home: "C:\\Users\\tester" });
+  assert.equal(
+    path,
+    resolve("C:\\Users\\tester", ".dsh", "dream", "router.jsonl"),
+  );
+  const override = resolveAuditPath({
+    env: { DSH_DREAM_ROUTER_AUDIT: "D:\\logs\\router.jsonl" },
+    home: "C:\\Users\\tester",
+  });
+  assert.equal(override, resolve("D:\\logs\\router.jsonl"));
+  // A DSH profile directory must not move the documented path any more.
+  const withProfile = resolveAuditPath({
+    env: { DSH_PROFILE_DIR: "C:\\Users\\tester\\.dsh\\profiles\\desktop" },
+    home: "C:\\Users\\tester",
+  });
+  assert.equal(
+    withProfile,
+    resolve("C:\\Users\\tester", ".dsh", "dream", "router.jsonl"),
+  );
+  // `DSH_HOME` already points at the `.dsh` directory itself.
+  const withDshHome = resolveAuditPath({
+    env: { DSH_HOME: "E:\\dsh-home" },
+    home: "C:\\Users\\tester",
+  });
+  assert.equal(withDshHome, resolve("E:\\dsh-home", "dream", "router.jsonl"));
+});
+
+test("ensureFile creates the parent directory and an empty log file", async () => {
+  const dir = auditDir("ensure");
+  const file = join(dir, "nested", "router.jsonl");
+  try {
+    assert.equal(existsSync(file), false);
+    const audit = new RouterAudit({ path: file });
+    const result = await audit.ensureFile();
+    assert.equal(result.ok, true);
+    assert.equal(result.path, file);
+    assert.equal(existsSync(file), true);
+    assert.equal(statSync(file).size, 0);
+    assert.equal(audit.describe().fileCreated, true);
+    // Idempotent: a second call must not truncate an existing log.
+    await audit.record({
+      query: "上次那个方案",
+      traceId: "t1",
+      decision: "retrieve",
+      source: "regex",
+      probabilityRetrieve: 1,
+      confidence: 1,
+      threshold: 0.55,
+      uncertaintyBand: 0.1,
+      latencyMs: 0.2,
+      budgetMs: 200,
+    });
+    await audit.flush();
+    const before = statSync(file).size;
+    await audit.ensureFile();
+    assert.equal(statSync(file).size, before);
+    assert.equal(audit.describe().writes, 1);
+    rmSync(dir, { recursive: true, force: true });
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("engine warmup creates the audit file and the first route appends hashed JSONL", async () => {
+  const dir = auditDir("engine");
+  const file = join(dir, "router.jsonl");
+  try {
+    const engine = createRouterEngine({
+      getConfig: () => ({
+        router: routerConfig({
+          audit: { enabled: true, store_query: "hash" },
+        }),
+      }),
+      local: fakeLocal(),
+      auditPath: file,
+      diag: () => {},
+    });
+    await engine.warmup();
+    assert.equal(existsSync(file), true, "warmup must create the audit file");
+    const status = await engine.status();
+    assert.equal(status.audit.enabled, true);
+    assert.equal(status.audit.path, file);
+    assert.equal(status.audit.fileCreated, true);
+
+    await engine.route({ query: "上次那个蓝色马克杯", sessionId: "s-9", turn: 1 });
+    await engine._audit.flush();
+    const lines = readFileSync(file, "utf8").trim().split("\n");
+    assert.equal(lines.length, 1);
+    const record = JSON.parse(lines[0]);
+    assert.equal(record.query, undefined);
+    assert.equal(record.query_hash, hashQuery("上次那个蓝色马克杯"));
+    assert.equal(record.decision, "retrieve");
+    const after = await engine.status();
+    assert.equal(after.audit.writes, 1);
+    assert.equal(after.audit.lastError, null);
+    rmSync(dir, { recursive: true, force: true });
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("audit failures are recorded instead of thrown", async () => {
+  const dir = auditDir("broken");
+  try {
+    const blocker = join(dir, "not-a-directory");
+    writeFileSync(blocker, "x", "utf8");
+    const audit = new RouterAudit({ path: join(blocker, "router.jsonl") });
+    const result = await audit.ensureFile();
+    assert.equal(result.ok, false);
+    assert.ok(audit.describe().lastError, "lastError should explain the failure");
+    // record() must stay non-throwing; the decision path cannot fail on audit.
+    audit.record({
+      query: "x",
+      traceId: "t2",
+      decision: "skip",
+      source: "regex",
+      probabilityRetrieve: 0,
+      confidence: 1,
+      threshold: 0.55,
+      uncertaintyBand: 0.1,
+      latencyMs: 0,
+      budgetMs: 200,
+    });
+    await audit.flush();
+    assert.equal(audit.describe().writes, 0);
+    rmSync(dir, { recursive: true, force: true });
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
 });
 
 // ------------------------------------------------------------ circuit / cache

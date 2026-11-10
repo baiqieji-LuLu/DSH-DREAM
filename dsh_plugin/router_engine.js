@@ -19,7 +19,8 @@
 
 import { appendFile, mkdir, rename, stat } from "node:fs/promises";
 import { createHash, randomUUID } from "node:crypto";
-import { dirname } from "node:path";
+import { homedir } from "node:os";
+import { dirname, resolve } from "node:path";
 import {
   RegexRouter,
   RULES_VERSION,
@@ -232,6 +233,30 @@ export function hashQuery(text) {
   return createHash("sha256").update(normalizeQuery(text)).digest("hex");
 }
 
+/**
+ * Canonical audit-log location.
+ *
+ * The design document specifies `~/.dsh/dream/router.jsonl`; the older
+ * implementation nested it under the DSH profile
+ * (`<profile>/.dream/router.jsonl`), which is why a monitor watching the
+ * documented path never saw a file.  `DSH_DREAM_ROUTER_AUDIT` can point
+ * somewhere else explicitly.
+ *
+ * @param {{env?: Record<string, string|undefined>, home?: string}} [options]
+ * @returns {string} absolute path
+ */
+export function resolveAuditPath({
+  env = typeof process !== "undefined" ? process.env : {},
+  home = homedir(),
+} = {}) {
+  const override = String(env.DSH_DREAM_ROUTER_AUDIT || "").trim();
+  if (override) return resolve(override);
+  // `DSH_HOME` already points at the `~/.dsh` directory itself when set.
+  const dshHome = String(env.DSH_HOME || "").trim();
+  const base = dshHome ? resolve(dshHome) : resolve(home, ".dsh");
+  return resolve(base, "dream", "router.jsonl");
+}
+
 function defaultNow() {
   try {
     return globalThis.performance?.now?.() ?? Date.now();
@@ -394,6 +419,10 @@ export class CircuitBreaker {
 /**
  * Append-only JSONL audit log.  Writes are queued and never block a decision.
  */
+function typeName(error) {
+  return error?.name || error?.constructor?.name || "Error";
+}
+
 export class RouterAudit {
   /**
    * @param {{path?: string|null, storeQuery?: "hash"|"full"|"none",
@@ -416,7 +445,60 @@ export class RouterAudit {
     this._write = write;
     this._queue = Promise.resolve();
     this._bytes = null;
-    this._ensureDir = null;
+    this.created = false;
+    this.writes = 0;
+    this.lastWriteAt = null;
+    /** Last mkdir/append error; surfaced through `describe()`/status. */
+    this.lastError = null;
+  }
+
+  /**
+   * Create the parent directory and the (empty) log file if they are missing.
+   *
+   * Called once at plugin startup so `Get-Content -Wait` can follow the file
+   * before the first turn, and again lazily before the first append.
+   *
+   * @returns {Promise<{ok: boolean, path: string|null, error?: string}>}
+   */
+  async ensureFile() {
+    if (!this.path) {
+      return { ok: Boolean(this._write), path: null };
+    }
+    try {
+      await mkdir(dirname(this.path), { recursive: true });
+      // `appendFile` with an empty payload creates the file without touching
+      // existing content.
+      await appendFile(this.path, "", "utf8");
+      if (this._bytes === null) {
+        try {
+          this._bytes = (await stat(this.path)).size;
+        } catch {
+          this._bytes = 0;
+        }
+      }
+      this.created = true;
+      this.lastError = null;
+      return { ok: true, path: this.path };
+    } catch (error) {
+      this.lastError = `${typeName(error)}: ${error?.message || error}`;
+      this.diag?.(`[Router] audit file unavailable (${this.path}): ${this.lastError}`);
+      return { ok: false, path: this.path, error: this.lastError };
+    }
+  }
+
+  /** @returns {object} Audit health for diagnostics and `router.status`. */
+  describe() {
+    return {
+      enabled: Boolean(this._write || this.path),
+      path: this.path,
+      storeQuery: this.storeQuery,
+      maxBytes: this.maxBytes,
+      bytes: this._bytes,
+      writes: this.writes,
+      lastWriteAt: this.lastWriteAt,
+      lastError: this.lastError,
+      fileCreated: this.created,
+    };
   }
 
   /**
@@ -477,7 +559,8 @@ export class RouterAudit {
     this._queue = this._queue
       .then(() => this._append(line))
       .catch((error) => {
-        this.diag?.(`[Router] audit write failed: ${error?.message || error}`);
+        this.lastError = `${typeName(error)}: ${error?.message || error}`;
+        this.diag?.(`[Router] audit write failed: ${this.lastError}`);
       });
   }
 
@@ -489,11 +572,18 @@ export class RouterAudit {
   async _append(line) {
     if (this._write) {
       await this._write(line);
+      this.writes += 1;
+      this.lastWriteAt = this.nowWall().toISOString();
+      this.lastError = null;
       return;
     }
     if (!this.path) return;
-    this._ensureDir ??= mkdir(dirname(this.path), { recursive: true });
-    await this._ensureDir;
+    if (!this.created) {
+      const ensured = await this.ensureFile();
+      if (!ensured.ok) {
+        throw new Error(ensured.error || "audit file unavailable");
+      }
+    }
     const lineBytes = Buffer.byteLength(line, "utf8");
     if (this._bytes === null) {
       try {
@@ -512,6 +602,9 @@ export class RouterAudit {
     }
     await appendFile(this.path, line, "utf8");
     this._bytes += lineBytes;
+    this.writes += 1;
+    this.lastWriteAt = this.nowWall().toISOString();
+    this.lastError = null;
   }
 }
 
@@ -836,6 +929,7 @@ export class RouterEngine {
       shadowMode: config.shadowMode,
       cloud: cloudInfo,
       local: localInfo,
+      audit: this._audit?.describe?.() ?? null,
       regex: {
         enabled: config.regex.enabled,
         rulesVersion: RULES_VERSION,
@@ -854,10 +948,41 @@ export class RouterEngine {
     };
   }
 
+  /**
+   * Create the audit directory/file so an operator can `Get-Content -Wait`
+   * before the first turn.  Called from `warmup()` (plugin startup only).
+   *
+   * @returns {Promise<{ok: boolean, path: string|null, error?: string}>}
+   */
+  async ensureAuditLog() {
+    try {
+      const config = this._config();
+      if (config.audit.enabled === false) {
+        return { ok: false, path: this._audit?.path ?? null, disabled: true };
+      }
+      const result = await this._audit?.ensureFile?.();
+      if (result?.ok) {
+        this.diag?.(`[Router] audit log ready: ${result.path}`);
+      } else if (result?.error) {
+        this.diag?.(`[Router] audit log unavailable: ${result.error}`);
+      }
+      return result ?? { ok: false, path: null };
+    } catch (error) {
+      this.diag?.(
+        `[Router] audit log setup failed: ${error?.message || error}`,
+      );
+      return { ok: false, path: this._audit?.path ?? null };
+    }
+  }
+
   /** Warm the local backend; safe to call from plugin startup only. */
   async warmup() {
     try {
-      if (this._config().enabled === false) {
+      const config = this._config();
+      if (config.audit.enabled !== false) {
+        await this.ensureAuditLog();
+      }
+      if (config.enabled === false) {
         this.diag?.("[Router] disabled; skipping local warmup");
         return this.status();
       }

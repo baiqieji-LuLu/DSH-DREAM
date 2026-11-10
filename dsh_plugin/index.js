@@ -18,7 +18,6 @@ import {
   writeFileSync,
 } from "node:fs";
 import { createRequire } from "node:module";
-import { homedir } from "node:os";
 import { dirname, resolve } from "node:path";
 import {
   applySessionEvent,
@@ -38,7 +37,7 @@ import { normalizePayload, redactPayload } from "./config_bridge.js";
 import { registerMemoryTools } from "./memory_tools.js";
 import { registerPreRetrieval } from "./pre_retrieval.js";
 import { CloudRouter } from "./router_cloud.js";
-import { createRouterEngine } from "./router_engine.js";
+import { createRouterEngine, resolveAuditPath } from "./router_engine.js";
 import { LocalRouterClient } from "./router_local.js";
 
 // DSH's plugin contract injects declared services into `ctx` before apply().
@@ -475,12 +474,10 @@ export function apply(ctx, config) {
 
     // --- RouterEngine (v0.4.0) -----------------------------------------
     // The router only says "retrieve" or "skip"; it never writes dialogue or
-    // prompt text. Its audit log stores a query hash by default and lives
-    // outside the checkout so it can never be committed by accident.
-    const auditDir = resolve(
-      process.env.DSH_PROFILE_DIR || resolve(homedir(), ".dsh"),
-      ".dream",
-    );
+    // prompt text. Its audit log stores a query hash by default and lives at
+    // the documented path (`~/.dsh/dream/router.jsonl`, overridable with
+    // DSH_DREAM_ROUTER_AUDIT) so operators can tail one known file.
+    const auditPath = resolveAuditPath();
     const resolveRouterCredential = async (envName) => {
       if (!envName) return "";
       try {
@@ -513,9 +510,14 @@ export function apply(ctx, config) {
       getConfig: () => readBridgeFile(target) || {},
       local: localRouter,
       cloud: cloudRouter,
-      auditPath: resolve(auditDir, "router.jsonl"),
+      auditPath,
       diag,
     });
+    diag(`[Router] audit log path: ${auditPath}`);
+    console.log(`[Router] audit log path: ${auditPath}`);
+    // Create the file immediately (independent of the Python runtime) so an
+    // operator can start `Get-Content -Wait` before the first turn.
+    void router.ensureAuditLog();
 
     registerMemoryTools(ctx, { queryMemory, writeTurn, diag });
     registerPreRetrieval(ctx, {
@@ -765,9 +767,30 @@ export function apply(ctx, config) {
               }
             },
           });
+          const disposeRouter = child.webServer.register({
+            kind: "exact",
+            path: "/dsh-dream/router",
+            handler: async (req, res) => {
+              if (req.method !== "GET") {
+                res.writeHead(405, { "content-type": "application/json" });
+                res.end(JSON.stringify({ ok: false, error: "GET required" }));
+                return;
+              }
+              try {
+                const status = await router.status();
+                status.auditPath = auditPath;
+                res.writeHead(200, { "content-type": "application/json" });
+                res.end(JSON.stringify(status));
+              } catch (error) {
+                res.writeHead(500, { "content-type": "application/json" });
+                res.end(JSON.stringify({ ok: false, error: String(error) }));
+              }
+            },
+          });
           return () => {
             dispose?.();
             disposeRuntime?.();
+            disposeRouter?.();
           };
         },
         "DSH-DREAM.http-bridge",
