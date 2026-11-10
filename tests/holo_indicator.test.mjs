@@ -197,6 +197,14 @@ const cssEnd = source.indexOf("`;", cssStart);
 const holoCss = source.slice(cssStart, cssEnd);
 assert.ok(holoCss.includes(".dsh-dream-holo-theme"));
 assert.ok(
+  holoCss.includes("--dsh-dream-holo-bg: #0d0d0d"),
+  "theme must use the dark surface",
+);
+assert.ok(
+  holoCss.includes("--dsh-dream-holo-fg: #f5f5f5"),
+  "theme must use light text",
+);
+assert.ok(
   !/(^|\n)\s*(body|html|:root)\b/.test(holoCss),
   "theme CSS must not target body/html/:root",
 );

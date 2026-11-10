@@ -82,7 +82,7 @@ window.__ModuleLoader__.load({
         'A UI hint only — not the holographic switch. Hiding it does not stop recording.',
       holoIndicatorStyle: 'Indicator style',
       holoStyleBadge: 'badge (dot only)',
-      holoStyleTheme: 'theme (white background, black text)',
+      holoStyleTheme: 'theme (black background, white text)',
       holoIndicatorOn: 'HOLO · RECORDING',
       holoIndicatorAria:
         'Holographic mode is on. Every turn is being written to long-term memory.',
@@ -201,7 +201,7 @@ window.__ModuleLoader__.load({
         '这只是界面提示，不是全息开关；关闭提示不会停止落库。',
       holoIndicatorStyle: '提示样式',
       holoStyleBadge: 'badge（小灯）',
-      holoStyleTheme: 'theme（白底黑字）',
+      holoStyleTheme: 'theme（黑底白字）',
       holoIndicatorOn: '全息 · 落库中',
       holoIndicatorAria:
         '全息模式已开启，每轮对话都会自动写入长期记忆。',
@@ -596,11 +596,11 @@ window.__ModuleLoader__.load({
           0 0 0 2px rgba(0, 0, 0, 0.55);
       }
       .dsh-dream-holo-theme {
-        --dsh-dream-holo-bg: #ffffff;
-        --dsh-dream-holo-fg: #111111;
-        --dsh-dream-holo-fg-muted: #4a4a4a;
-        --dsh-dream-holo-fill: #f5f5f5;
-        --dsh-dream-holo-line: rgba(17, 17, 17, 0.14);
+        --dsh-dream-holo-bg: #0d0d0d;
+        --dsh-dream-holo-fg: #f5f5f5;
+        --dsh-dream-holo-fg-muted: #c9c9c9;
+        --dsh-dream-holo-fill: #1b1b1b;
+        --dsh-dream-holo-line: rgba(255, 255, 255, 0.18);
 
         background-color: var(--dsh-dream-holo-bg);
         color: var(--dsh-dream-holo-fg);
@@ -609,32 +609,32 @@ window.__ModuleLoader__.load({
         --dsw-alias-bg-base: var(--dsh-dream-holo-bg);
         --dsw-alias-bg-layer-1: var(--dsh-dream-holo-bg);
         --dsw-alias-bg-layer-2: var(--dsh-dream-holo-fill);
-        --dsw-alias-bg-layer-3: #eeeeee;
+        --dsw-alias-bg-layer-3: #262626;
         --dsw-alias-bg-module-platform: var(--dsh-dream-holo-fill);
         --dsw-alias-label-primary: var(--dsh-dream-holo-fg);
         --dsw-alias-label-primary-bluish: var(--dsh-dream-holo-fg);
         --dsw-alias-label-primary-dimmed: var(--dsh-dream-holo-fg-muted);
         --dsw-alias-label-secondary: var(--dsh-dream-holo-fg-muted);
-        --dsw-alias-label-tertiary: #5c5c5c;
-        --dsw-alias-label-caption: #666666;
-        --dsw-alias-label-dimmed: #777777;
-        --dsw-alias-border-l1: #ececec;
-        --dsw-alias-border-l2: #e0e0e0;
-        --dsw-alias-border-l3: #cfcfcf;
-        --dsw-alias-border-l4: #bdbdbd;
+        --dsw-alias-label-tertiary: #b8b8b8;
+        --dsw-alias-label-caption: #a8a8a8;
+        --dsw-alias-label-dimmed: #979797;
+        --dsw-alias-border-l1: #2a2a2a;
+        --dsw-alias-border-l2: #363636;
+        --dsw-alias-border-l3: #4a4a4a;
+        --dsw-alias-border-l4: #5c5c5c;
         --dsw-alias-interactive-bg-hover: var(--dsh-dream-holo-line);
-        --dsw-alias-interactive-bg-hover-solid: #f0f0f0;
-        --dsw-alias-interactive-bg-active: rgba(0, 0, 0, 0.1);
-        --dsw-alias-scrollbar-bg-l1: rgba(0, 0, 0, 0.14);
-        --dsw-alias-scrollbar-bg-l2: rgba(0, 0, 0, 0.2);
-        --dsw-alias-scrollbar-hover-l2: rgba(0, 0, 0, 0.3);
+        --dsw-alias-interactive-bg-hover-solid: #222222;
+        --dsw-alias-interactive-bg-active: rgba(255, 255, 255, 0.12);
+        --dsw-alias-scrollbar-bg-l1: rgba(255, 255, 255, 0.18);
+        --dsw-alias-scrollbar-bg-l2: rgba(255, 255, 255, 0.24);
+        --dsw-alias-scrollbar-hover-l2: rgba(255, 255, 255, 0.36);
         --dsw-specific-input-major: var(--dsh-dream-holo-bg);
         --dsw-specific-selector: var(--dsh-dream-holo-fill);
         --dsw-specific-menu: var(--dsh-dream-holo-bg);
         --dsw-elevation-stroke-color: var(--dsh-dream-holo-line);
-        --dsw-elevation-soft: 0 2px 8px rgba(0, 0, 0, 0.06);
-        --dsw-elevation-panel: 0 8px 24px rgba(0, 0, 0, 0.08);
-        --dsw-elevation-prominent: 0 16px 40px rgba(0, 0, 0, 0.12);
+        --dsw-elevation-soft: 0 2px 8px rgba(0, 0, 0, 0.4);
+        --dsw-elevation-panel: 0 8px 24px rgba(0, 0, 0, 0.5);
+        --dsw-elevation-prominent: 0 16px 40px rgba(0, 0, 0, 0.6);
       }
     `;
 

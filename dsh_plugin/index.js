@@ -261,7 +261,7 @@ export const Config = z.object({
         .union([z.const("badge"), z.const("theme")])
         .default("badge")
         .description(
-          "badge shows only the small dot and label; theme also turns the chat container into white background with black text.",
+          "badge shows only the small dot and label; theme also turns the chat container into black background with white text.",
         ),
     })
     .default({ enabled: true, style: "badge" })

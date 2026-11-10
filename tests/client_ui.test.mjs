@@ -119,7 +119,7 @@ assert.deepEqual(missingEn, [], `missing en keys: ${missingEn.join(", ")}`);
 assert.equal(dictionaries.zh.holoIndicatorOn, "全息 · 落库中");
 assert.equal(dictionaries.en.holoIndicatorOn, "HOLO · RECORDING");
 assert.equal(dictionaries.zh.holoStyleBadge, "badge（小灯）");
-assert.equal(dictionaries.zh.holoStyleTheme, "theme（白底黑字）");
+assert.equal(dictionaries.zh.holoStyleTheme, "theme（黑底白字）");
 assert.match(dictionaries.zh.holoIndicatorHint, /不是全息开关/);
 assert.match(dictionaries.en.holoIndicatorHint, /not the holographic switch/i);
 assert.ok(
