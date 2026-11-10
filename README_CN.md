@@ -1,6 +1,6 @@
 # DSH-DREAM
 
-> Status: v0.3.6 Pre-Alpha
+> Status: v0.4.0
 
 **DSH-DREAM: Durable RAG-Enhanced Agent Memory**
 
@@ -127,6 +127,7 @@ API key:   your Zhipu key
 
 - **四层边界。** 锚点（硬约束）、最近窗口、检索记忆和审计快照各自独立。
 - **全息记忆。** `assistant_message` 已加入白名单，与 `user_message`、`system_fact`、`tool_result` 并列；`model_hint` 永远拒绝。`MemoryAgent` 会无条件双写完整回合；DSH 全息模式会在 `agent/turn-stopping` 强制写入。
+- **全息提示（holo_indicator）。** 全息模式开启时界面显示可拖动的「全息 · 落库中」小灯；它只是提示不是开关。设置项「显示全息提示」可单独关闭，关闭后界面无任何新增元素，且不影响落库。要停止落库，必须关闭「全息模式」本身；小灯默认在会话框左上角，可拖动，位置保存在 `localStorage`（键 `dsh-dream.holo-indicator.position.v1`）。旧配置里的 `holo_indicator.style` 会被静默忽略，不报错。
 - **状态槽位冲突检测，而不是无差别 latest-wins。** 只有直接的位置/状态变化（“钥匙在鞋柜” → “钥匙在花盆”）才会折叠；像“买了杯子 → 摔碎 → 买新的补上”这样的动作序列会完整保留。
 - **双轨记忆（Dual-track Memory）。** 支持自动区分“状态更新”与“历史事件流变”。对于偏好更改等冲突，自动覆盖旧状态；对于事件演进（如购买与损坏），完整保留时间线。
 - **时间线检索。** `timeline_mode=True` 会跳过冲突折叠，按时间戳升序返回相关原始记忆。

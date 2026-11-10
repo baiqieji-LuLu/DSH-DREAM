@@ -1,6 +1,6 @@
 # DSH-DREAM
 
-> Status: v0.3.6 Pre-Alpha
+> Status: v0.4.0
 
 **DSH-DREAM: Durable RAG-Enhanced Agent Memory**
 
@@ -59,6 +59,11 @@ of your DSH build). Turn on:
 - **Enable long-term memory**;
 - **Holographic mode (forced full memory)** if you want every turn persisted, not only turns
   where the model extracted a fact.
+
+The small "HOLO · RECORDING" badge is only an **indicator** (controlled separately
+by `holo_indicator`), not a switch. Turning the indicator off does not stop writes.
+It sits at the top-left of the conversation frame by default and can be dragged
+elsewhere.
 
 Click **Save**, then send a test message. The first retrieval may take a few seconds while
 the local vector database and embedding model are initialized.
@@ -150,6 +155,13 @@ preserved; cloud re-embedding consumes tokens, so back up `.chroma` before switc
   `user_message`, `system_fact`, and `tool_result`; `model_hint` is always rejected.
   `MemoryAgent` performs unconditional dual write of the full turn, and DSH Holographic mode
   forces a write at `agent/turn-stopping`.
+- **Holographic indicator (`holo_indicator`).** While Holographic mode is on, a draggable
+  "HOLO · RECORDING" badge is shown. It is a hint, not a switch: the "Show holographic
+  indicator" setting turns the badge off without changing what gets written. To stop
+  writes, turn off Holographic mode itself. The badge starts at the top-left of the
+  conversation box and can be dragged anywhere; its position is stored in `localStorage`
+  under `dsh-dream.holo-indicator.position.v1`. A legacy `holo_indicator.style` key is
+  silently ignored.
 - **State-slot conflict detection, not blanket latest-wins.** Only a direct location/state
   change (“key in the shoe cabinet” → “key in the flower pot”) is collapsed. A sequence such
   as “bought a mug → broke it → bought a replacement” is preserved.
