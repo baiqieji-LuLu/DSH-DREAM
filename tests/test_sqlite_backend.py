@@ -8,7 +8,10 @@ from pathlib import Path
 import numpy as np
 import pytest
 
-from agent_memory.storage.sqlite_backend import SqliteVecBackend
+from agent_memory.storage.sqlite_backend import (
+    SqliteVecBackend,
+    _batch_embedding_blobs,
+)
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
 TEST_TMP = PROJECT_ROOT / ".test-tmp" / "sqlite-backend"
@@ -62,6 +65,11 @@ def test_sqlite_vec_round_trip() -> None:
     finally:
         backend.close()
         path.unlink(missing_ok=True)
+
+
+def test_batch_embedding_blobs_rejects_wrong_length() -> None:
+    with pytest.raises(ValueError, match="expected 8"):
+        _batch_embedding_blobs([1], [b"\x00" * 4], 2)
 
 
 def test_get_corpus_split_matches_join_and_keyset_pages() -> None:

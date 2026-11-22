@@ -16,6 +16,37 @@ from typing import Any
 import numpy as np
 
 
+def _batch_embedding_blobs(
+    rowids: Sequence[int],
+    blobs: Sequence[bytes],
+    dimension: int,
+) -> tuple[np.ndarray, dict[int, np.ndarray]]:
+    """Convert vec0 blobs to one contiguous matrix without per-row copies.
+
+    Raises:
+        ValueError: If any blob has a length other than ``dimension * 4``
+            bytes. A silent reshape would misalign every later row.
+    """
+    if len(rowids) != len(blobs):
+        raise ValueError("rowid/embedding count mismatch")
+    width = int(dimension)
+    expected = width * 4
+    for rowid, blob in zip(rowids, blobs):
+        if len(blob) != expected:
+            raise ValueError(
+                f"embedding for rowid {rowid} has {len(blob)} bytes; "
+                f"expected {expected} ({width} float32 values)"
+            )
+    if not blobs:
+        return np.empty((0, width), dtype=np.float32), {}
+    buffer = b"".join(blobs)
+    matrix = np.frombuffer(buffer, dtype=np.float32).reshape(len(blobs), width)
+    vectors = {
+        int(rowid): matrix[index] for index, rowid in enumerate(rowids)
+    }
+    return matrix, vectors
+
+
 class SqliteVecBackend:
     """Vector storage backed by sqlite-vec (float32 embeddings)."""
 
@@ -273,14 +304,21 @@ class SqliteVecBackend:
         vectors: dict[int, np.ndarray] = {}
         if want_embeddings:
             embed_start = time.perf_counter()
+            # No ORDER BY: alignment is by rowid, not by vector-table order.
             vector_rows = self._conn.execute(
-                "SELECT rowid, embedding FROM vec_memories ORDER BY rowid"
+                "SELECT rowid, embedding FROM vec_memories"
             ).fetchall()
-            for rowid, blob in vector_rows:
-                vectors[int(rowid)] = np.frombuffer(
-                    blob,
-                    dtype=np.float32,
-                ).copy()
+            rowids = [int(row[0]) for row in vector_rows]
+            blobs = [row[1] for row in vector_rows]
+            del vector_rows
+            _matrix, vectors = _batch_embedding_blobs(
+                rowids,
+                blobs,
+                self.dimension,
+            )
+            # The source blobs are no longer needed; the matrix views keep the
+            # contiguous buffer alive.
+            del blobs
             timings["cache_embed"] += time.perf_counter() - embed_start
 
         ids: list[str] = []
