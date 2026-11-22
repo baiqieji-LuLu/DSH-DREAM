@@ -180,6 +180,7 @@ class MemoryPluginTests(unittest.TestCase):
                 similarity=None,
                 rrf_score=0.0328,
                 retrieval_source="bm25",
+                similarity_source="unmeasured",
             )
         )
 
@@ -189,6 +190,7 @@ class MemoryPluginTests(unittest.TestCase):
         self.assertEqual(hit["rrf_score"], 0.0328)
         self.assertIsNone(hit["similarity"])
         self.assertEqual(hit["retrieval_source"], "bm25")
+        self.assertEqual(hit["similarity_source"], "unmeasured")
         json.dumps(result)
 
     def test_memory_search_includes_last_retrieval_timing(self) -> None:

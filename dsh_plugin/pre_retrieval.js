@@ -127,6 +127,17 @@ export function topSimilarity(hits) {
   return best;
 }
 
+/** Source marker of the hit that produced `score`. */
+function similaritySourceFor(hits, score) {
+  const list = Array.isArray(hits) ? hits : [];
+  for (const hit of list) {
+    if (hitSimilarity(hit) === score) {
+      return String(hit?.similarity_source || "unmeasured");
+    }
+  }
+  return "unmeasured";
+}
+
 /**
  * Decide whether a retrieved hit list is strong enough to inject.
  *
@@ -139,23 +150,34 @@ export function topSimilarity(hits) {
  *
  * @param {Array<object>} hits
  * @returns {{inject: boolean, reason: string, score: number,
- *   retrievalSource: string|null}}
+ *   retrievalSource: string|null, similaritySource: string|null}}
  */
 export function recallDecision(hits) {
   const list = Array.isArray(hits) ? hits : [];
   if (!list.length) {
-    return { inject: false, reason: "no_hits", score: 0, retrievalSource: null };
+    return {
+      inject: false,
+      reason: "no_hits",
+      score: 0,
+      retrievalSource: null,
+      similaritySource: null,
+    };
   }
   const top = list[0];
   const score = topSimilarity(list);
   const topScore = hitSimilarity(top);
   const topSource = String(top?.retrieval_source || "");
+  const topSimilaritySource = String(
+    top?.similarity_source || "unmeasured",
+  );
+  const anySimilaritySource = similaritySourceFor(list, score);
   if (topScore >= SIMILARITY_THRESHOLD) {
     return {
       inject: true,
       reason: "vector",
       score: topScore,
       retrievalSource: topSource || null,
+      similaritySource: topSimilaritySource,
     };
   }
   if (topSource === "hybrid" && topScore >= FUSED_SIMILARITY_THRESHOLD) {
@@ -164,6 +186,7 @@ export function recallDecision(hits) {
       reason: "hybrid",
       score: topScore,
       retrievalSource: topSource,
+      similaritySource: topSimilaritySource,
     };
   }
   if (topSource === "bm25" && Number(top?.rrf_score) > 0) {
@@ -172,6 +195,7 @@ export function recallDecision(hits) {
       reason: "keyword",
       score: topScore,
       retrievalSource: topSource,
+      similaritySource: topSimilaritySource,
     };
   }
   if (score >= SIMILARITY_THRESHOLD) {
@@ -180,6 +204,7 @@ export function recallDecision(hits) {
       reason: "vector_any_hit",
       score,
       retrievalSource: topSource || null,
+      similaritySource: anySimilaritySource,
     };
   }
   return {
@@ -187,6 +212,7 @@ export function recallDecision(hits) {
     reason: "below_threshold",
     score: Math.max(score, topScore),
     retrievalSource: topSource || null,
+    similaritySource: anySimilaritySource,
   };
 }
 
@@ -396,7 +422,9 @@ export function registerPreRetrieval(
     if (!recall.inject) {
       const line =
         `[PreRetrieval] skipped: ${recall.reason} ` +
-        `score=${recall.score.toFixed(3)} vector>=${SIMILARITY_THRESHOLD} ` +
+        `score=${recall.score.toFixed(3)} ` +
+        `sim_source=${recall.similaritySource || "unmeasured"} ` +
+        `vector>=${SIMILARITY_THRESHOLD} ` +
         `hybrid>=${FUSED_SIMILARITY_THRESHOLD} retrieval_ms=${elapsedMs}`;
       console.log(line);
       diag(line);
@@ -434,6 +462,7 @@ export function registerPreRetrieval(
     }
     diag(
       `[PreRetrieval] inject: ${recall.reason} score=${recall.score.toFixed(3)} ` +
+        `sim_source=${recall.similaritySource || "unmeasured"} ` +
         `source=${recall.retrievalSource || "unknown"} hits=${hits.length} ` +
         `retrieval_ms=${elapsedMs}`,
     );

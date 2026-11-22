@@ -1077,10 +1077,28 @@ test("recall gate accepts fused hybrids and keyword hits", () => {
   assert.equal(vectorLow.reason, "below_threshold");
 
   const keyword = recallDecision([
-    { similarity: null, retrieval_source: "bm25", rrf_score: 0.016 },
+    {
+      similarity: 0.42,
+      similarity_source: "backfilled",
+      retrieval_source: "bm25",
+      rrf_score: 0.016,
+    },
   ]);
   assert.equal(keyword.inject, true);
   assert.equal(keyword.reason, "keyword");
+  assert.equal(keyword.similaritySource, "backfilled");
+
+  const keywordUnmeasured = recallDecision([
+    {
+      similarity: null,
+      similarity_source: "unmeasured",
+      retrieval_source: "bm25",
+      rrf_score: 0.016,
+    },
+  ]);
+  assert.equal(keywordUnmeasured.inject, true);
+  assert.equal(keywordUnmeasured.reason, "keyword");
+  assert.equal(keywordUnmeasured.similaritySource, "unmeasured");
 
   const anyHit = recallDecision([
     { similarity: 0.3, retrieval_source: "hybrid", rrf_score: 0.03 },
@@ -1239,6 +1257,7 @@ test("pure BM25 hit with rrf_score injects with reason=keyword", async () => {
             content: "蓝色马克杯关键词精确匹配",
             source_type: "user_message",
             similarity: null,
+            similarity_source: "unmeasured",
             retrieval_source: "bm25",
             rrf_score: 0.0328,
             metadata: { timestamp_ms: Date.now() },
@@ -1255,6 +1274,7 @@ test("pure BM25 hit with rrf_score injects with reason=keyword", async () => {
   assert.equal(decision.messages.length, 2);
   const injected = logs.find((line) => line.includes("inject: keyword"));
   assert.ok(injected, `missing keyword inject log: ${logs.join("\n")}`);
+  assert.ok(injected.includes("sim_source=unmeasured"), injected);
 });
 
 test("recall telemetry records inject, no_hits, and unavailable", async () => {

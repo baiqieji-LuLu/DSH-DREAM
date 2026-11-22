@@ -31,7 +31,7 @@ import time
 import urllib.error
 import urllib.request
 import uuid
-from collections.abc import Iterable, Mapping, Sequence
+from collections.abc import Callable, Iterable, Mapping, Sequence
 from dataclasses import dataclass
 from functools import cmp_to_key
 
@@ -409,6 +409,9 @@ class MemoryHit:
             ``content_sha256``.
         distance: Chroma distance when supplied. Lower is more similar; the
             exact scale depends on the configured collection metric.
+        similarity_source: ``"measured"`` for a vector/hybrid hit,
+            ``"backfilled"`` for a BM25-only hit whose cosine was looked up in
+            the Flat matrix, and ``"unmeasured"`` when no cosine is available.
         retrieval_source: ``"vector"`` for HNSW hits, ``"keyword"`` for the
             SQLite/``$contains`` fallback.
     """
@@ -421,6 +424,7 @@ class MemoryHit:
     similarity: float | None = None
     rrf_score: float | None = None
     retrieval_source: str = "vector"
+    similarity_source: str = "unmeasured"
 
 
 class RAGStore:
@@ -1214,11 +1218,13 @@ class RAGStore:
         candidate_k = max(top_k * 10, 60)
         if selected_time_sources is not None:
             candidate_k = max(top_k * 20, 200)
+        query_vector_out: list[np.ndarray] = []
         vector_hits = self._search_vector(
             query_text,
             top_k=candidate_k,
             selected_types=selected_types,
             timings=timings,
+            query_vector_out=query_vector_out,
         )
         bm25_hits = self._bm25_search(
             query_text,
@@ -1226,7 +1232,35 @@ class RAGStore:
             selected_types=selected_types,
             timings=timings,
         )
-        fused = self._rrf_fuse(vector_hits, bm25_hits)
+        cosine_by_id: Callable[[str], float | None] | None = None
+        if (
+            query_vector_out
+            and self._flat_embeddings is not None
+            and self._corpus_ids is not None
+        ):
+            # The Flat scan already normalized the query vector; reuse it to
+            # backfill only BM25-only hits (a dot product each).
+            query_vector = query_vector_out[0]
+            flat_embeddings = self._flat_embeddings
+            corpus_ids = self._corpus_ids
+            index_by_id = {
+                memory_id: index
+                for index, memory_id in enumerate(corpus_ids)
+            }
+
+            def _cosine_by_id(memory_id: str) -> float | None:
+                index = index_by_id.get(memory_id)
+                if index is None:
+                    return None
+                value = float(flat_embeddings[index] @ query_vector)
+                return value if math.isfinite(value) else None
+
+            cosine_by_id = _cosine_by_id
+        fused = self._rrf_fuse(
+            vector_hits,
+            bm25_hits,
+            cosine_by_id=cosine_by_id,
+        )
         if selected_time_sources is not None:
             fused = [
                 hit
@@ -1287,6 +1321,7 @@ class RAGStore:
         top_k: int,
         selected_types: set[str] | None,
         timings: dict[str, float] | None = None,
+        query_vector_out: list[np.ndarray] | None = None,
     ) -> list[MemoryHit]:
         total = self.count()
         if total == 0:
@@ -1301,6 +1336,7 @@ class RAGStore:
                 top_k=top_k,
                 selected_types=selected_types,
                 timings=timings,
+                query_vector_out=query_vector_out,
             )
             if flat_hits is not None:
                 return flat_hits
@@ -1583,6 +1619,7 @@ class RAGStore:
         top_k: int,
         selected_types: set[str] | None,
         timings: dict[str, float] | None = None,
+        query_vector_out: list[np.ndarray] | None = None,
     ) -> list[MemoryHit] | None:
         if not _NUMPY_AVAILABLE or not self._ensure_corpus_cache(timings):
             return None
@@ -1619,6 +1656,9 @@ class RAGStore:
             if norm == 0:
                 return []
             query_vector = query_vector / norm
+            if query_vector_out is not None:
+                # Share the exact normalized query vector with RRF backfill.
+                query_vector_out.append(query_vector)
             sims = self._flat_embeddings @ query_vector
             if selected_types is not None:
                 mask = np.asarray(
@@ -1967,6 +2007,8 @@ class RAGStore:
     def _rrf_fuse(
         vector_hits: list[MemoryHit],
         bm25_hits: list[MemoryHit],
+        *,
+        cosine_by_id: Callable[[str], float | None] | None = None,
     ) -> list[MemoryHit]:
         """Reciprocal-rank fusion: score = 1 / (RRF_K + rank)."""
         entries: dict[str, dict[str, Any]] = {}
@@ -1999,17 +2041,32 @@ class RAGStore:
                     similarity=hit.similarity,
                     rrf_score=entry["score"],
                     retrieval_source="hybrid",
+                    similarity_source=(
+                        hit.similarity_source
+                        if hit.similarity is not None
+                        else "unmeasured"
+                    ),
                 )
             elif "bm25" in sources:
+                measured = (
+                    cosine_by_id(hit.memory_id)
+                    if cosine_by_id is not None
+                    else None
+                )
+                if measured is not None and not math.isfinite(float(measured)):
+                    measured = None
                 hit = MemoryHit(
                     memory_id=hit.memory_id,
                     content=hit.content,
                     source_type=hit.source_type,
                     metadata=hit.metadata,
                     distance=None,
-                    similarity=None,
+                    similarity=measured,
                     rrf_score=entry["score"],
                     retrieval_source="bm25",
+                    similarity_source=(
+                        "backfilled" if measured is not None else "unmeasured"
+                    ),
                 )
             else:
                 hit = MemoryHit(
@@ -2021,6 +2078,11 @@ class RAGStore:
                     similarity=hit.similarity,
                     rrf_score=entry["score"],
                     retrieval_source="vector",
+                    similarity_source=(
+                        hit.similarity_source
+                        if hit.similarity is not None
+                        else "unmeasured"
+                    ),
                 )
             fused.append(hit)
         fused.sort(
@@ -2228,6 +2290,9 @@ class RAGStore:
             distance=numeric_distance,
             similarity=numeric_similarity,
             retrieval_source=retrieval_source,
+            similarity_source=(
+                "measured" if numeric_similarity is not None else "unmeasured"
+            ),
         )
 
     @staticmethod

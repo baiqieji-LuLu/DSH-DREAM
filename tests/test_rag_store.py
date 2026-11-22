@@ -17,6 +17,7 @@ from unittest.mock import patch
 from agent_memory.rag_store import (
     ALLOWED_SOURCE_TYPES,
     ForbiddenSourceTypeError,
+    MemoryHit,
     MemoryValidationError,
     RAGStore,
     SourceTypeError,
@@ -194,6 +195,66 @@ class RAGStoreTests(unittest.TestCase):
         self.assertAlmostEqual(sum(cache_parts), cache_ms, delta=0.11)
         self.assertAlmostEqual(sum(values[:5]), total_ms, delta=0.11)
         self.assertIn("total", self.store.last_retrieval_timing)
+
+    def test_rrf_backfills_bm25_cosine_without_reordering(self) -> None:
+        vector_hit = MemoryHit(
+            memory_id="vector-1",
+            content="vector",
+            source_type="user_message",
+            metadata={},
+            similarity=0.5,
+            retrieval_source="vector",
+            similarity_source="measured",
+        )
+        bm25_hit = MemoryHit(
+            memory_id="bm25-1",
+            content="keyword",
+            source_type="user_message",
+            metadata={},
+            retrieval_source="bm25",
+        )
+        without_backfill = RAGStore._rrf_fuse([vector_hit], [bm25_hit])
+        with_backfill = RAGStore._rrf_fuse(
+            [vector_hit],
+            [bm25_hit],
+            cosine_by_id=lambda memory_id: (
+                0.42 if memory_id == "bm25-1" else None
+            ),
+        )
+        self.assertEqual(
+            [hit.memory_id for hit in without_backfill],
+            [hit.memory_id for hit in with_backfill],
+        )
+        fused_bm25 = next(
+            hit for hit in with_backfill if hit.memory_id == "bm25-1"
+        )
+        self.assertAlmostEqual(fused_bm25.similarity or 0.0, 0.42)
+        self.assertEqual(fused_bm25.similarity_source, "backfilled")
+        self.assertIsNone(fused_bm25.distance)
+
+    def test_rrf_keeps_bm25_similarity_unmeasured_when_id_is_absent(self) -> None:
+        bm25_hit = MemoryHit(
+            memory_id="missing-vector",
+            content="keyword",
+            source_type="user_message",
+            metadata={},
+            retrieval_source="bm25",
+        )
+        fused = RAGStore._rrf_fuse(
+            [],
+            [bm25_hit],
+            cosine_by_id=lambda _memory_id: None,
+        )
+        self.assertIsNone(fused[0].similarity)
+        self.assertEqual(fused[0].similarity_source, "unmeasured")
+
+    def test_hnsw_fallback_keeps_similarity_unmeasured(self) -> None:
+        self.store.add_memory("keyword needle", "user_message")
+        hits = self.store.search("keyword needle", top_k=3)
+        self.assertTrue(hits)
+        self.assertTrue(
+            all(hit.similarity_source == "unmeasured" for hit in hits)
+        )
 
     def test_read_side_whitelist_skips_tampered_model_hint(self) -> None:
         self.collection.records["tampered"] = (
