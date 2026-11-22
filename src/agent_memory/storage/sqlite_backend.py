@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import json
 import sqlite3
+import time
 from collections.abc import Mapping, Sequence
 from pathlib import Path
 from typing import Any
@@ -239,6 +240,109 @@ class SqliteVecBackend:
             "documents": [row[1] for row in rows],
             "metadatas": [json.loads(row[2]) for row in rows],
             "embeddings": embeddings,
+        }
+
+    def get_corpus_split(
+        self,
+        *,
+        include: Sequence[str],
+        page_size: int = 5000,
+    ) -> dict[str, Any]:
+        """Load the corpus with two independent queries (no vec0 JOIN).
+
+        The original ``get`` path joins the vec0 virtual table per row
+        (``memories JOIN vec_memories``), which is expensive on large corpora.
+        This path fetches all vectors once, then reads memories in keyset pages
+        (``WHERE rowid > last_rowid``), aligning both by rowid.
+
+        Returns ids/documents/metadatas/embeddings in rowid order plus per-stage
+        timings in seconds. When embeddings are requested, only memories with a
+        vector are returned, matching the JOIN's INNER JOIN semantics.
+        """
+        wanted = {str(item) for item in (include or [])}
+        want_embeddings = "embeddings" in wanted
+        page_size = max(1, int(page_size))
+
+        timings = {
+            "cache_ids": 0.0,
+            "cache_docs": 0.0,
+            "cache_meta": 0.0,
+            "cache_embed": 0.0,
+        }
+
+        vectors: dict[int, np.ndarray] = {}
+        if want_embeddings:
+            embed_start = time.perf_counter()
+            vector_rows = self._conn.execute(
+                "SELECT rowid, embedding FROM vec_memories ORDER BY rowid"
+            ).fetchall()
+            for rowid, blob in vector_rows:
+                vectors[int(rowid)] = np.frombuffer(
+                    blob,
+                    dtype=np.float32,
+                ).copy()
+            timings["cache_embed"] += time.perf_counter() - embed_start
+
+        ids: list[str] = []
+        documents: list[str] = []
+        metadatas: list[dict[str, Any]] = []
+        embeddings: list[np.ndarray] = []
+        after_rowid: int | None = None
+
+        while True:
+            page_start = time.perf_counter()
+            sql = (
+                "SELECT rowid, memory_id, document, metadata_json "
+                "FROM memories"
+            )
+            params: list[Any] = []
+            if after_rowid is not None:
+                sql += " WHERE rowid > ?"
+                params.append(after_rowid)
+            sql += " ORDER BY rowid LIMIT ?"
+            params.append(page_size)
+            rows = self._conn.execute(sql, params).fetchall()
+            # The shared page fetch is charged to cache_meta, mirroring the
+            # JOIN path where the fetch and metadata decoding are one bucket.
+            timings["cache_meta"] += time.perf_counter() - page_start
+            if not rows:
+                break
+
+            ids_start = time.perf_counter()
+            page_ids = [row[1] for row in rows]
+            timings["cache_ids"] += time.perf_counter() - ids_start
+
+            docs_start = time.perf_counter()
+            page_documents = [row[2] for row in rows]
+            timings["cache_docs"] += time.perf_counter() - docs_start
+
+            meta_start = time.perf_counter()
+            page_metadatas = [json.loads(row[3]) for row in rows]
+            timings["cache_meta"] += time.perf_counter() - meta_start
+
+            align_start = time.perf_counter()
+            for index, row in enumerate(rows):
+                rowid = int(row[0])
+                vector = vectors.get(rowid) if want_embeddings else None
+                if want_embeddings and vector is None:
+                    continue
+                ids.append(page_ids[index])
+                documents.append(page_documents[index])
+                metadatas.append(page_metadatas[index])
+                if want_embeddings:
+                    embeddings.append(vector)
+            timings["cache_meta"] += time.perf_counter() - align_start
+
+            after_rowid = int(rows[-1][0])
+            if len(rows) < page_size:
+                break
+
+        return {
+            "ids": ids,
+            "documents": documents,
+            "metadatas": metadatas,
+            "embeddings": embeddings,
+            "timings": timings,
         }
 
     def delete(self, ids: Sequence[str]) -> None:

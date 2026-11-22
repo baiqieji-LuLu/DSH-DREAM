@@ -23,6 +23,7 @@ import hashlib
 import importlib
 import json
 import math
+import os
 import re
 import sys
 import threading
@@ -92,6 +93,16 @@ _MAX_ADD_BATCH_SIZE: Final[int] = 5_000
 MIN_VECTOR_SCORE: Final[float] = 0.35
 RRF_K: Final[int] = 60
 DEFAULT_FLAT_MAX_RECORDS: Final[int] = 200_000
+
+
+def _env_corpus_cache_join() -> bool:
+    """Developer fallback: force the old vec0 JOIN cache loader."""
+    return os.environ.get("DSH_DREAM_CACHE_JOIN", "").strip().lower() in {
+        "1",
+        "true",
+        "yes",
+        "on",
+    }
 
 
 def _add_timing(
@@ -442,6 +453,7 @@ class RAGStore:
         auto_rebuild_collection: bool = True,
         flat_max_records: int = DEFAULT_FLAT_MAX_RECORDS,
         storage_backend: str = "sqlite-vec",
+        corpus_cache_join: bool | None = None,
         embedding_engine: str = "onnx",
     ) -> None:
         if not isinstance(collection_name, str) or not collection_name.strip():
@@ -479,6 +491,11 @@ class RAGStore:
             "chroma"
             if (client is not None or embedding_function is not None)
             else str(storage_backend).strip().lower()
+        )
+        self._corpus_cache_join = (
+            _env_corpus_cache_join()
+            if corpus_cache_join is None
+            else bool(corpus_cache_join)
         )
         self._embedding_engine = str(embedding_engine).strip().lower()
         self._collection: Any = None
@@ -1317,6 +1334,17 @@ class RAGStore:
             include_embeddings = (
                 self._flat_max_records > 0 and total < self._flat_max_records
             )
+            if (
+                not self._corpus_cache_join
+                and hasattr(self._backend, "get_corpus_split")
+            ):
+                if self._ensure_corpus_cache_split(
+                    total=total,
+                    include_embeddings=include_embeddings,
+                    timings=timings,
+                ):
+                    return True
+                # Split load failed: fall through to the legacy JOIN loader.
             ids: list[str] = []
             documents: list[str] = []
             metadatas: list[Mapping[str, Any]] = []
@@ -1443,6 +1471,82 @@ class RAGStore:
                 self._flat_unavailable = True
                 self._bm25_unavailable = True
                 return False
+
+    def _ensure_corpus_cache_split(
+        self,
+        *,
+        total: int,
+        include_embeddings: bool,
+        timings: dict[str, float] | None = None,
+    ) -> bool:
+        """Load the cache through the backend's split-query implementation.
+
+        On any failure the caller falls through to the legacy JOIN loader, so
+        this method only records timings after a fully successful load.
+        """
+        local_timings: dict[str, float] = {}
+        try:
+            include = ["documents", "metadatas"]
+            if include_embeddings:
+                include.append("embeddings")
+            split = self._backend.get_corpus_split(
+                include=include,
+                page_size=5000,
+            )
+            split_timings = split.get("timings") or {}
+            for key in (
+                "cache_ids",
+                "cache_docs",
+                "cache_meta",
+                "cache_embed",
+            ):
+                _add_cache_timing(
+                    local_timings,
+                    key,
+                    float(split_timings.get(key, 0.0)),
+                )
+            ids = list(split.get("ids") or [])
+            documents = list(split.get("documents") or [])
+            metadatas = list(split.get("metadatas") or [])
+            embeddings = list(split.get("embeddings") or [])
+            if len(ids) != total:
+                raise RAGStoreError(
+                    f"corpus cache expected {total} rows, got {len(ids)}"
+                )
+            self._corpus_ids = ids
+            self._corpus_documents = documents
+            self._corpus_metadatas = metadatas
+            if include_embeddings:
+                embed_final_start = time.perf_counter()
+                matrix = np.asarray(embeddings, dtype=np.float32)
+                if matrix.ndim != 2 or matrix.shape[0] != len(ids):
+                    raise RAGStoreError("invalid embedding matrix shape")
+                norms = np.linalg.norm(matrix, axis=1, keepdims=True)
+                norms[norms == 0] = 1.0
+                self._flat_embeddings = matrix / norms
+                _add_cache_timing(
+                    local_timings,
+                    "cache_embed",
+                    time.perf_counter() - embed_final_start,
+                )
+            for key in (
+                "cache_ids",
+                "cache_docs",
+                "cache_meta",
+                "cache_embed",
+            ):
+                _add_cache_timing(
+                    timings,
+                    key,
+                    local_timings.get(key, 0.0),
+                )
+            return True
+        except Exception:
+            self._corpus_ids = None
+            self._corpus_documents = None
+            self._corpus_metadatas = None
+            self._flat_embeddings = None
+            return False
 
     def _search_flat(
         self,

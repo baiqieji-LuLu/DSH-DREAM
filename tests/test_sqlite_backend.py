@@ -62,3 +62,46 @@ def test_sqlite_vec_round_trip() -> None:
     finally:
         backend.close()
         path.unlink(missing_ok=True)
+
+
+def test_get_corpus_split_matches_join_and_keyset_pages() -> None:
+    pytest.importorskip("sqlite_vec")
+    TEST_TMP.mkdir(parents=True, exist_ok=True)
+    path = TEST_TMP / f"db-split-{uuid.uuid4().hex}.sqlite3"
+
+    def embed(texts: list[str]) -> list[list[float]]:
+        return [
+            [float(len(text)), float(sum(map(ord, text)) % 97), 1.0]
+            for text in texts
+        ]
+
+    backend = SqliteVecBackend(path, dimension=3, embedding_function=embed)
+    try:
+        backend.add(
+            ids=[f"m{index}" for index in range(10)],
+            documents=[f"document {index}" for index in range(10)],
+            metadatas=[
+                {"source_type": "user_message", "timestamp_ms": index}
+                for index in range(10)
+            ],
+        )
+        include = ["documents", "metadatas", "embeddings"]
+        joined = backend.get(limit=5000, offset=0, include=include)
+        split = backend.get_corpus_split(include=include, page_size=3)
+
+        assert split["ids"] == joined["ids"]
+        assert split["documents"] == joined["documents"]
+        assert split["metadatas"] == joined["metadatas"]
+        np.testing.assert_array_equal(
+            np.stack(split["embeddings"]),
+            np.stack(joined["embeddings"]),
+        )
+        assert set(split["timings"]) == {
+            "cache_ids",
+            "cache_docs",
+            "cache_meta",
+            "cache_embed",
+        }
+    finally:
+        backend.close()
+        path.unlink(missing_ok=True)
