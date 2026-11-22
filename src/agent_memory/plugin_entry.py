@@ -388,13 +388,17 @@ class MemoryPlugin:
                 raise
             kwargs.pop("timeline_mode", None)
             hits = self._rag_store.search(query_text, **kwargs)
-        return {
+        result = {
             "query": query_text,
             "enabled": True,
             "timeline_mode": timeline_mode,
             "count": len(hits),
             "results": [_hit_to_dict(hit) for hit in hits],
         }
+        timing = getattr(self._rag_store, "last_retrieval_timing", None)
+        if isinstance(timing, dict) and timing:
+            result["timing"] = dict(timing)
+        return result
 
     def memory_add(self, content: str, source_type: str) -> dict[str, Any]:
         """Store one whitelisted memory.

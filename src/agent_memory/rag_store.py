@@ -129,11 +129,11 @@ def _add_cache_timing(
     timings["cache"] = timings.get("cache", 0.0) + elapsed
 
 
-def _retrieval_timing_line(
+def _retrieval_timing_values(
     timings: Mapping[str, float],
     started: float,
-) -> str:
-    """Format the one-line stage summary; fusion absorbs unmeasured setup."""
+) -> dict[str, float]:
+    """Return milliseconds for the timing line and recall telemetry."""
     elapsed_ms = max(0.0, (time.perf_counter() - started) * 1000.0)
     vectorize_ms = round(timings.get("vectorize", 0.0) * 1000.0, 1)
     vector_scan_ms = round(timings.get("vector_scan", 0.0) * 1000.0, 1)
@@ -149,18 +149,34 @@ def _retrieval_timing_line(
     measured_ms = vectorize_ms + vector_scan_ms + bm25_ms + cache_ms
     fusion_ms = round(max(0.0, elapsed_ms - measured_ms), 1)
     total_ms = round(measured_ms + fusion_ms, 1)
+    return {
+        "vectorize": vectorize_ms,
+        "vector_scan": vector_scan_ms,
+        "bm25": bm25_ms,
+        "fusion": fusion_ms,
+        "cache": cache_ms,
+        "cache_ids": cache_ids_ms,
+        "cache_docs": cache_docs_ms,
+        "cache_meta": cache_meta_ms,
+        "cache_embed": cache_embed_ms,
+        "total": total_ms,
+    }
+
+
+def _format_retrieval_timing(values: Mapping[str, float]) -> str:
+    """Format the one-line stage summary from precomputed millisecond values."""
     return (
         "[Retrieval][Timing] "
-        f"vectorize={vectorize_ms:.1f}ms "
-        f"vector_scan={vector_scan_ms:.1f}ms "
-        f"bm25={bm25_ms:.1f}ms "
-        f"fusion={fusion_ms:.1f}ms "
-        f"cache={cache_ms:.1f}ms "
-        f"cache_ids={cache_ids_ms:.1f}ms "
-        f"cache_docs={cache_docs_ms:.1f}ms "
-        f"cache_meta={cache_meta_ms:.1f}ms "
-        f"cache_embed={cache_embed_ms:.1f}ms "
-        f"total={total_ms:.1f}ms"
+        f"vectorize={values.get('vectorize', 0.0):.1f}ms "
+        f"vector_scan={values.get('vector_scan', 0.0):.1f}ms "
+        f"bm25={values.get('bm25', 0.0):.1f}ms "
+        f"fusion={values.get('fusion', 0.0):.1f}ms "
+        f"cache={values.get('cache', 0.0):.1f}ms "
+        f"cache_ids={values.get('cache_ids', 0.0):.1f}ms "
+        f"cache_docs={values.get('cache_docs', 0.0):.1f}ms "
+        f"cache_meta={values.get('cache_meta', 0.0):.1f}ms "
+        f"cache_embed={values.get('cache_embed', 0.0):.1f}ms "
+        f"total={values.get('total', 0.0):.1f}ms"
     )
 
 
@@ -516,6 +532,7 @@ class RAGStore:
         self._flat_unavailable = False
         self._bm25: Any | None = None
         self._bm25_unavailable = False
+        self._last_retrieval_timing: dict[str, float] = {}
 
         active_client = client if client is not None else self._create_client()
         self._client = active_client
@@ -653,6 +670,11 @@ class RAGStore:
     def embedding_provider(self) -> str:
         """Return ``local`` or ``openai_compatible``."""
         return self._embedding_provider
+
+    @property
+    def last_retrieval_timing(self) -> dict[str, float]:
+        """Milliseconds from the latest ``search_memory`` call."""
+        return dict(self._last_retrieval_timing)
 
     @property
     def auto_rebuild_collection(self) -> bool:
@@ -1225,7 +1247,13 @@ class RAGStore:
         else:
             result_hits = self._rerank_recency(fused, query_text)[:top_k]
             sort_label = "RRF + 时间衰减"
-        print(_retrieval_timing_line(timings, started), file=sys.stderr, flush=True)
+        timing_values = _retrieval_timing_values(timings, started)
+        self._last_retrieval_timing = dict(timing_values)
+        print(
+            _format_retrieval_timing(timing_values),
+            file=sys.stderr,
+            flush=True,
+        )
         print(
             f"[Retrieval] Returned {len(result_hits)} memories, "
             f"intent={intent}, sorted by: {sort_label}.",

@@ -191,6 +191,21 @@ class MemoryPluginTests(unittest.TestCase):
         self.assertEqual(hit["retrieval_source"], "bm25")
         json.dumps(result)
 
+    def test_memory_search_includes_last_retrieval_timing(self) -> None:
+        self.store.last_retrieval_timing = {
+            "vectorize": 1.0,
+            "vector_scan": 2.0,
+            "bm25": 3.0,
+            "fusion": 4.0,
+            "cache": 5.0,
+            "total": 15.0,
+        }
+        self.plugin.memory_add("timing probe", "user_message")
+
+        result = self.plugin.memory_search("timing")
+
+        self.assertEqual(result["timing"]["total"], 15.0)
+
     def test_rendered_context_contains_query_and_audit_metadata(self) -> None:
         self.plugin.memory_add("The user prefers dark mode.", "system_fact")
         result = self.plugin.get_rendered_context("Which theme should I use?")

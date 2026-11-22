@@ -1041,6 +1041,7 @@ function registerRouter({
   calls,
   callArgs = null,
   logs = null,
+  recallRecords = null,
 }) {
   const ctx = fakeCtx();
   registerPreRetrieval(ctx, {
@@ -1054,6 +1055,10 @@ function registerRouter({
     getConfig: () => config,
     router,
     createUserMessage: (options) => ({ role: "user", ...options }),
+    recallTelemetry: (record) => {
+      recallRecords?.push(record);
+      return true;
+    },
   });
   return ctx.handlers["agent/pre-step"];
 }
@@ -1250,6 +1255,71 @@ test("pure BM25 hit with rrf_score injects with reason=keyword", async () => {
   assert.equal(decision.messages.length, 2);
   const injected = logs.find((line) => line.includes("inject: keyword"));
   assert.ok(injected, `missing keyword inject log: ${logs.join("\n")}`);
+});
+
+test("recall telemetry records inject, no_hits, and unavailable", async () => {
+  const records = [];
+  const responses = [
+    {
+      ...hintResult("记住的事实"),
+      result: {
+        ...hintResult("记住的事实").result,
+        timing: {
+          vectorize: 1.0,
+          vector_scan: 2.0,
+          bm25: 3.0,
+          fusion: 4.0,
+          cache: 5.0,
+          total: 15.0,
+        },
+      },
+    },
+    {
+      ok: true,
+      result: {
+        results: [],
+        timing: {
+          vectorize: 1.0,
+          vector_scan: 2.0,
+          bm25: 3.0,
+          fusion: 4.0,
+          cache: 5.0,
+          total: 15.0,
+        },
+      },
+    },
+    { ok: false, code: "QUERY_TIMEOUT", error: "query timeout" },
+  ];
+  const handler = registerRouter({
+    config: { enable_auto_recall: true, router: { enabled: true } },
+    router: {
+      route: async () => ({ decision: "retrieve", source: "local", shadow: false }),
+    },
+    queryMemory: async () => responses.shift(),
+    calls: [],
+    recallRecords: records,
+  });
+
+  const firstQuery = "第一轮：记住的事实";
+  await preStep(handler, firstQuery);
+  await preStep(handler, "第二轮：空结果");
+  await preStep(handler, "第三轮：超时");
+
+  assert.equal(records.length, 3);
+  assert.deepEqual(
+    records.map((record) => record.gate.outcome),
+    ["inject", "skip", "unavailable"],
+  );
+  assert.equal(records[0].router.decision, "retrieve");
+  assert.equal(records[0].gate.reason, "vector");
+  assert.equal(records[0].gate.hits, 1);
+  assert.equal(records[0].timing.total, 15.0);
+  assert.equal(records[1].gate.reason, "no_hits");
+  assert.equal(records[2].gate.reason, "QUERY_TIMEOUT");
+  assert.equal(records[0].query_chars, Array.from(firstQuery).length);
+  assert.equal(typeof records[0].query_hash, "string");
+  assert.equal("query" in records[0], false);
+  assert.equal(JSON.stringify(records[0]).includes(firstQuery), false);
 });
 
 test("router.enabled=false restores the legacy behaviour", async () => {

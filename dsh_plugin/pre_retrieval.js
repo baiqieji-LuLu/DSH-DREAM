@@ -17,6 +17,7 @@
  * explicit `memory_search` tool call never goes through here.
  */
 import { isUsableDialogueText, messageText } from "./holographic_events.js";
+import { appendRecallTelemetry } from "./recall_telemetry.js";
 import { hashQuery } from "./router_engine.js";
 
 // `@deepseek-ai/dsh-llm` is a Host peer dependency. Keeping the import lazy
@@ -247,6 +248,47 @@ function routerLog(prefix, route, query) {
   );
 }
 
+function recallRouterRecord(
+  route,
+  fallbackDecision = "retrieve",
+  source = "legacy",
+) {
+  if (route) {
+    return {
+      decision: route.decision,
+      source: route.source || "unknown",
+      p: Number(route.probabilityRetrieve ?? 0),
+      latency_ms: Number(route.latencyMs ?? 0),
+      ...(route.shadow === true ? { shadow: true } : {}),
+      ...(route.degraded === true ? { degraded: true } : {}),
+    };
+  }
+  return {
+    decision: fallbackDecision,
+    source,
+    p: fallbackDecision === "retrieve" ? 1 : 0,
+    latency_ms: 0,
+  };
+}
+
+function recallTimingRecord(result) {
+  const timing = result?.result?.timing;
+  if (!timing || typeof timing !== "object") return null;
+  const out = {};
+  for (const key of [
+    "vectorize",
+    "vector_scan",
+    "bm25",
+    "fusion",
+    "cache",
+    "total",
+  ]) {
+    const value = Number(timing[key]);
+    out[key] = Number.isFinite(value) ? value : 0;
+  }
+  return out;
+}
+
 export function registerPreRetrieval(
   ctx,
   {
@@ -256,17 +298,50 @@ export function registerPreRetrieval(
     getConfig = () => ({}),
     router = null,
     createUserMessage = null,
+    recallTelemetry = appendRecallTelemetry,
   },
 ) {
+  /**
+   * Append one structured recall record. Telemetry must never break the gate.
+   */
+  const logRecall = (base, gate, timing = null) => {
+    try {
+      const record = {
+        ts: new Date().toISOString(),
+        turn: base.turn,
+        query_hash: base.queryHash ?? null,
+        query_chars: base.queryChars ?? 0,
+        router: base.router ?? null,
+        gate,
+        timing,
+      };
+      const pending = recallTelemetry(record);
+      if (pending && typeof pending.catch === "function") {
+        pending.catch((error) =>
+          diag(`[RecallTelemetry] append failed: ${error?.stack || error}`),
+        );
+      }
+    } catch (error) {
+      diag(`[RecallTelemetry] append failed: ${error?.stack || error}`);
+    }
+  };
   /** Injected or lazily loaded DSH message factory. */
   const messageFactory = () => resolveCreateUserMessage(createUserMessage);
+  /** Monotonic pre-step counter for recall telemetry. */
+  let turnCounter = 0;
 
   /**
    * Run the unchanged retrieval + injection path.
    *
    * @returns {Promise<object>} the (possibly extended) pre-step decision.
    */
-  const retrieveAndInject = async (query, decision, signal, timeoutMs) => {
+  const retrieveAndInject = async (
+    query,
+    decision,
+    signal,
+    timeoutMs,
+    base,
+  ) => {
     const startedAt = Date.now();
     const result = await queryMemory(query, 3, timeoutMs, signal);
     const elapsedMs = Math.max(0, Date.now() - startedAt);
@@ -274,6 +349,13 @@ export function registerPreRetrieval(
       const line = `[PreRetrieval] cancelled: elapsed=${elapsedMs}ms timeout=${timeoutMs}ms`;
       console.log(line);
       diag(line);
+      logRecall(base, {
+        outcome: "cancelled",
+        reason: "signal_aborted",
+        score: 0,
+        hits: 0,
+        retrieval_ms: elapsedMs,
+      });
       return decision;
     }
     if (!result || result.ok === false) {
@@ -298,6 +380,13 @@ export function registerPreRetrieval(
       console.warn(line);
       diag(line);
       holoLog(line);
+      logRecall(base, {
+        outcome: "unavailable",
+        reason: code,
+        score: 0,
+        hits: 0,
+        retrieval_ms: elapsedMs,
+      });
       return decision;
     }
     const hits = Array.isArray(result?.result?.results)
@@ -311,6 +400,17 @@ export function registerPreRetrieval(
         `hybrid>=${FUSED_SIMILARITY_THRESHOLD} retrieval_ms=${elapsedMs}`;
       console.log(line);
       diag(line);
+      logRecall(
+        base,
+        {
+          outcome: "skip",
+          reason: recall.reason,
+          score: Number(recall.score ?? 0),
+          hits: hits.length,
+          retrieval_ms: elapsedMs,
+        },
+        recallTimingRecord(result),
+      );
       return decision;
     }
     const hint = createMemoryHint(result?.result);
@@ -319,6 +419,17 @@ export function registerPreRetrieval(
       console.log(line);
       diag(line);
       holoLog(line);
+      logRecall(
+        base,
+        {
+          outcome: "skip",
+          reason: "empty_hint",
+          score: Number(recall.score ?? 0),
+          hits: hits.length,
+          retrieval_ms: elapsedMs,
+        },
+        recallTimingRecord(result),
+      );
       return decision;
     }
     diag(
@@ -328,6 +439,17 @@ export function registerPreRetrieval(
     );
     holoLog(
       `Pre-retrieval success: injected ${hits.length} memories in ${elapsedMs}ms`,
+    );
+    logRecall(
+      base,
+      {
+        outcome: "inject",
+        reason: recall.reason,
+        score: Number(recall.score ?? 0),
+        hits: hits.length,
+        retrieval_ms: elapsedMs,
+      },
+      recallTimingRecord(result),
     );
     // DSH's user/message event must carry role="user" (system-role messages
     // are rejected by the session schema). Keep the user role, but use a
@@ -349,6 +471,8 @@ export function registerPreRetrieval(
     console.log(`[PreRetrieval] agent/pre-step fired step=${step}`);
     const decision = await next();
     if (decision.kind === "reject" || step !== 1) return decision;
+    turnCounter += 1;
+    const turn = turnCounter;
 
     let config = {};
     try {
@@ -358,6 +482,21 @@ export function registerPreRetrieval(
     }
     if (config.enable_auto_recall === false) {
       console.log("[PreRetrieval] skipped: enable_auto_recall=false");
+      logRecall(
+        {
+          turn,
+          queryHash: null,
+          queryChars: 0,
+          router: recallRouterRecord(null, "skip", "config"),
+        },
+        {
+          outcome: "skip",
+          reason: "auto_recall_disabled",
+          score: 0,
+          hits: 0,
+          retrieval_ms: 0,
+        },
+      );
       return decision;
     }
     const preRetrievalTimeoutMs = resolvePreRetrievalTimeout(config);
@@ -365,8 +504,31 @@ export function registerPreRetrieval(
     const query = queryFromMessages(messages);
     if (!query) {
       console.log("[PreRetrieval] no usable user query");
+      logRecall(
+        {
+          turn,
+          queryHash: null,
+          queryChars: 0,
+          router: recallRouterRecord(null, "skip", "query"),
+        },
+        {
+          outcome: "skip",
+          reason: "no_query",
+          score: 0,
+          hits: 0,
+          retrieval_ms: 0,
+        },
+      );
       return decision;
     }
+    const queryHash = hashQuery(query);
+    const queryChars = Array.from(query).length;
+    const recallBase = (routerRecord) => ({
+      turn,
+      queryHash,
+      queryChars,
+      router: routerRecord,
+    });
 
     const routerConfig =
       config.router && typeof config.router === "object" ? config.router : {};
@@ -376,6 +538,16 @@ export function registerPreRetrieval(
     if (!routerEnabled) {
       if (shouldSkipPreRetrieval(query)) {
         console.log(`[PreRetrieval] fast-pass: query=${query.slice(0, 80)}`);
+        logRecall(
+          recallBase(recallRouterRecord(null, "skip", "legacy")),
+          {
+            outcome: "skip",
+            reason: "short_or_greeting",
+            score: 0,
+            hits: 0,
+            retrieval_ms: 0,
+          },
+        );
         return decision;
       }
       console.log(`[PreRetrieval] query=${query.slice(0, 120)}`);
@@ -384,6 +556,7 @@ export function registerPreRetrieval(
         decision,
         signal,
         preRetrievalTimeoutMs,
+        recallBase(recallRouterRecord(null, "retrieve", "legacy")),
       );
     }
 
@@ -409,10 +582,21 @@ export function registerPreRetrieval(
         decision,
         signal,
         preRetrievalTimeoutMs,
+        recallBase(recallRouterRecord(null, "retrieve", "neutral")),
       );
     }
     if (route.cancelled === true || signal?.aborted) {
       console.log("[Router] cancelled; leaving the pre-step decision unchanged");
+      logRecall(
+        recallBase(recallRouterRecord(route)),
+        {
+          outcome: "cancelled",
+          reason: "router_cancelled",
+          score: 0,
+          hits: 0,
+          retrieval_ms: 0,
+        },
+      );
       return decision;
     }
 
@@ -426,12 +610,23 @@ export function registerPreRetrieval(
         decision,
         signal,
         preRetrievalTimeoutMs,
+        recallBase(recallRouterRecord(route)),
       );
     }
 
     if (route.decision === "skip") {
       console.log(line);
       diag(line);
+      logRecall(
+        recallBase(recallRouterRecord(route)),
+        {
+          outcome: "skip",
+          reason: route.fallbackReason || "router_skip",
+          score: 0,
+          hits: 0,
+          retrieval_ms: 0,
+        },
+      );
       return decision;
     }
 
@@ -442,6 +637,7 @@ export function registerPreRetrieval(
       decision,
       signal,
       preRetrievalTimeoutMs,
+      recallBase(recallRouterRecord(route)),
     );
   };
 

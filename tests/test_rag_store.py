@@ -193,6 +193,7 @@ class RAGStoreTests(unittest.TestCase):
         total_ms = values[9]
         self.assertAlmostEqual(sum(cache_parts), cache_ms, delta=0.11)
         self.assertAlmostEqual(sum(values[:5]), total_ms, delta=0.11)
+        self.assertIn("total", self.store.last_retrieval_timing)
 
     def test_read_side_whitelist_skips_tampered_model_hint(self) -> None:
         self.collection.records["tampered"] = (
