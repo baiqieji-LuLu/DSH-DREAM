@@ -169,6 +169,28 @@ class MemoryPluginTests(unittest.TestCase):
         self.assertEqual(result["results"][0]["content"], "Use the staging cluster.")
         self.assertEqual(result["results"][0]["source_type"], "system_fact")
 
+    def test_memory_search_serializes_rrf_score_for_bm25_hits(self) -> None:
+        self.store.hits.append(
+            MemoryHit(
+                memory_id="bm25-1",
+                content="蓝色马克杯关键词精确匹配",
+                source_type=cast(SourceType, "user_message"),
+                metadata={"source_type": "user_message", "timestamp_ms": 1},
+                distance=None,
+                similarity=None,
+                rrf_score=0.0328,
+                retrieval_source="bm25",
+            )
+        )
+
+        result = self.plugin.memory_search("蓝色马克杯")
+
+        hit = result["results"][0]
+        self.assertEqual(hit["rrf_score"], 0.0328)
+        self.assertIsNone(hit["similarity"])
+        self.assertEqual(hit["retrieval_source"], "bm25")
+        json.dumps(result)
+
     def test_rendered_context_contains_query_and_audit_metadata(self) -> None:
         self.plugin.memory_add("The user prefers dark mode.", "system_fact")
         result = self.plugin.get_rendered_context("Which theme should I use?")

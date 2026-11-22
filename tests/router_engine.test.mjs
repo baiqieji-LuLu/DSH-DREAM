@@ -1219,6 +1219,39 @@ test("integration: a hybrid 0.59 recall still injects a hint", async () => {
   );
 });
 
+test("pure BM25 hit with rrf_score injects with reason=keyword", async () => {
+  const logs = [];
+  const handler = registerRouter({
+    config: { enable_auto_recall: true, router: { enabled: true } },
+    router: {
+      route: async () => ({ decision: "retrieve", source: "local", shadow: false }),
+    },
+    queryMemory: async () => ({
+      ok: true,
+      result: {
+        results: [
+          {
+            content: "蓝色马克杯关键词精确匹配",
+            source_type: "user_message",
+            similarity: null,
+            retrieval_source: "bm25",
+            rrf_score: 0.0328,
+            metadata: { timestamp_ms: Date.now() },
+          },
+        ],
+      },
+    }),
+    calls: [],
+    logs,
+  });
+
+  const decision = await preStep(handler, "蓝色马克杯");
+
+  assert.equal(decision.messages.length, 2);
+  const injected = logs.find((line) => line.includes("inject: keyword"));
+  assert.ok(injected, `missing keyword inject log: ${logs.join("\n")}`);
+});
+
 test("router.enabled=false restores the legacy behaviour", async () => {
   const calls = [];
   const handler = registerRouter({
