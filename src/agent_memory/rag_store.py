@@ -105,6 +105,19 @@ def _add_timing(
     timings[key] = timings.get(key, 0.0) + max(0.0, seconds)
 
 
+def _add_cache_timing(
+    timings: dict[str, float] | None,
+    key: str,
+    seconds: float,
+) -> None:
+    """Accumulate one cache sub-stage and keep ``cache`` equal to their sum."""
+    if timings is None:
+        return
+    elapsed = max(0.0, seconds)
+    timings[key] = timings.get(key, 0.0) + elapsed
+    timings["cache"] = timings.get("cache", 0.0) + elapsed
+
+
 def _retrieval_timing_line(
     timings: Mapping[str, float],
     started: float,
@@ -114,7 +127,14 @@ def _retrieval_timing_line(
     vectorize_ms = round(timings.get("vectorize", 0.0) * 1000.0, 1)
     vector_scan_ms = round(timings.get("vector_scan", 0.0) * 1000.0, 1)
     bm25_ms = round(timings.get("bm25", 0.0) * 1000.0, 1)
-    cache_ms = round(timings.get("cache", 0.0) * 1000.0, 1)
+    cache_ids_ms = round(timings.get("cache_ids", 0.0) * 1000.0, 1)
+    cache_docs_ms = round(timings.get("cache_docs", 0.0) * 1000.0, 1)
+    cache_meta_ms = round(timings.get("cache_meta", 0.0) * 1000.0, 1)
+    cache_embed_ms = round(timings.get("cache_embed", 0.0) * 1000.0, 1)
+    cache_ms = round(
+        cache_ids_ms + cache_docs_ms + cache_meta_ms + cache_embed_ms,
+        1,
+    )
     measured_ms = vectorize_ms + vector_scan_ms + bm25_ms + cache_ms
     fusion_ms = round(max(0.0, elapsed_ms - measured_ms), 1)
     total_ms = round(measured_ms + fusion_ms, 1)
@@ -125,6 +145,10 @@ def _retrieval_timing_line(
         f"bm25={bm25_ms:.1f}ms "
         f"fusion={fusion_ms:.1f}ms "
         f"cache={cache_ms:.1f}ms "
+        f"cache_ids={cache_ids_ms:.1f}ms "
+        f"cache_docs={cache_docs_ms:.1f}ms "
+        f"cache_meta={cache_meta_ms:.1f}ms "
+        f"cache_embed={cache_embed_ms:.1f}ms "
         f"total={total_ms:.1f}ms"
     )
 
@@ -1279,15 +1303,9 @@ class RAGStore:
         with self._lock:
             if self._corpus_ids is not None:
                 return True
-            cache_start = time.perf_counter()
-
-            def record_cache() -> None:
-                _add_timing(timings, "cache", time.perf_counter() - cache_start)
-
             if not _NUMPY_AVAILABLE:
                 self._flat_unavailable = True
                 self._bm25_unavailable = True
-                record_cache()
                 return False
             total = self.count()
             if total == 0:
@@ -1295,7 +1313,6 @@ class RAGStore:
                 self._corpus_documents = []
                 self._corpus_metadatas = []
                 self._flat_embeddings = np.empty((0, 0), dtype=np.float32)
-                record_cache()
                 return True
             include_embeddings = (
                 self._flat_max_records > 0 and total < self._flat_max_records
@@ -1310,32 +1327,69 @@ class RAGStore:
                     include = ["documents", "metadatas"]
                     if include_embeddings:
                         include.append("embeddings")
+                    fetch_start = time.perf_counter()
                     raw = self._backend.get(
                         limit=5000,
                         offset=offset,
                         include=include,
                     )
+                    # Chroma returns ids/docs/metadatas/embeddings in one
+                    # response. The shared fetch (including metadata JSON
+                    # decoding) is charged to cache_meta; per-field
+                    # materialization is charged to the matching sub-bucket.
+                    _add_cache_timing(
+                        timings,
+                        "cache_meta",
+                        time.perf_counter() - fetch_start,
+                    )
                     if not isinstance(raw, Mapping):
                         raise RAGStoreError("Chroma returned an invalid get response")
-                    # Chroma may return numpy arrays when embeddings are
-                    # requested; list() avoids ambiguous truth-value checks.
+
+                    ids_start = time.perf_counter()
                     raw_ids = raw.get("ids")
-                    raw_docs = raw.get("documents")
-                    raw_metas = raw.get("metadatas")
                     batch_ids = [] if raw_ids is None else list(raw_ids)
                     if not batch_ids:
+                        _add_cache_timing(
+                            timings,
+                            "cache_ids",
+                            time.perf_counter() - ids_start,
+                        )
                         break
-                    batch_docs = [] if raw_docs is None else list(raw_docs)
-                    batch_metas = [] if raw_metas is None else list(raw_metas)
-                    if len(batch_docs) != len(batch_ids) or len(batch_metas) != len(batch_ids):
-                        raise RAGStoreError("Chroma returned misaligned corpus batches")
                     ids.extend(str(value) for value in batch_ids)
+                    _add_cache_timing(
+                        timings,
+                        "cache_ids",
+                        time.perf_counter() - ids_start,
+                    )
+
+                    docs_start = time.perf_counter()
+                    raw_docs = raw.get("documents")
+                    batch_docs = [] if raw_docs is None else list(raw_docs)
                     documents.extend(str(value) for value in batch_docs)
+                    _add_cache_timing(
+                        timings,
+                        "cache_docs",
+                        time.perf_counter() - docs_start,
+                    )
+
+                    meta_start = time.perf_counter()
+                    raw_metas = raw.get("metadatas")
+                    batch_metas = [] if raw_metas is None else list(raw_metas)
                     metadatas.extend(
                         value if isinstance(value, Mapping) else {}
                         for value in batch_metas
                     )
+                    _add_cache_timing(
+                        timings,
+                        "cache_meta",
+                        time.perf_counter() - meta_start,
+                    )
+
+                    if len(batch_docs) != len(batch_ids) or len(batch_metas) != len(batch_ids):
+                        raise RAGStoreError("Chroma returned misaligned corpus batches")
+
                     if include_embeddings:
+                        embed_start = time.perf_counter()
                         raw_embeddings = raw.get("embeddings")
                         if raw_embeddings is None:
                             raise RAGStoreError(
@@ -1349,6 +1403,12 @@ class RAGStore:
                                 "Chroma returned misaligned embedding batches"
                             )
                         embeddings.extend(batch_embeddings)
+                        _add_cache_timing(
+                            timings,
+                            "cache_embed",
+                            time.perf_counter() - embed_start,
+                        )
+
                     offset += len(batch_ids)
                     if offset >= total:
                         break
@@ -1360,13 +1420,18 @@ class RAGStore:
                 self._corpus_documents = documents
                 self._corpus_metadatas = metadatas
                 if include_embeddings:
+                    embed_final_start = time.perf_counter()
                     matrix = np.asarray(embeddings, dtype=np.float32)
                     if matrix.ndim != 2 or matrix.shape[0] != len(ids):
                         raise RAGStoreError("invalid embedding matrix shape")
                     norms = np.linalg.norm(matrix, axis=1, keepdims=True)
                     norms[norms == 0] = 1.0
                     self._flat_embeddings = matrix / norms
-                record_cache()
+                    _add_cache_timing(
+                        timings,
+                        "cache_embed",
+                        time.perf_counter() - embed_final_start,
+                    )
                 return True
             except Exception:
                 # Injected test doubles or unusual clients may not support the
@@ -1377,7 +1442,6 @@ class RAGStore:
                 self._flat_embeddings = None
                 self._flat_unavailable = True
                 self._bm25_unavailable = True
-                record_cache()
                 return False
 
     def _search_flat(

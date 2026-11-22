@@ -180,12 +180,19 @@ class RAGStoreTests(unittest.TestCase):
         match = re.search(
             r"\[Retrieval\]\[Timing\] vectorize=([\d.]+)ms "
             r"vector_scan=([\d.]+)ms bm25=([\d.]+)ms "
-            r"fusion=([\d.]+)ms cache=([\d.]+)ms total=([\d.]+)ms",
+            r"fusion=([\d.]+)ms cache=([\d.]+)ms "
+            r"cache_ids=([\d.]+)ms cache_docs=([\d.]+)ms "
+            r"cache_meta=([\d.]+)ms cache_embed=([\d.]+)ms "
+            r"total=([\d.]+)ms",
             log,
         )
         self.assertIsNotNone(match, log)
         values = [float(value) for value in match.groups()]
-        self.assertAlmostEqual(sum(values[:5]), values[5], delta=0.11)
+        cache_ms = values[4]
+        cache_parts = values[5:9]
+        total_ms = values[9]
+        self.assertAlmostEqual(sum(cache_parts), cache_ms, delta=0.11)
+        self.assertAlmostEqual(sum(values[:5]), total_ms, delta=0.11)
 
     def test_read_side_whitelist_skips_tampered_model_hint(self) -> None:
         self.collection.records["tampered"] = (
