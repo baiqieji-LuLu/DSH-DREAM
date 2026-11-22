@@ -156,6 +156,32 @@ def test_embedding_bridge_values_are_trimmed() -> None:
         bridge.unlink(missing_ok=True)
 
 
+def test_pre_retrieval_timeout_defaults_and_clamps() -> None:
+    bridge = _bridge_path("pre-timeout")
+    rag_path = str((TEST_TMP_ROOT / "pre-timeout-db").resolve())
+    try:
+        bridge.write_text(
+            json.dumps({"rag_path": rag_path, "pre_retrieval_timeout_ms": 1}),
+            encoding="utf-8",
+        )
+        assert load_config(bridge).pre_retrieval_timeout_ms == 100
+
+        bridge.write_text(
+            json.dumps(
+                {"rag_path": rag_path, "pre_retrieval_timeout_ms": 999_999}
+            ),
+            encoding="utf-8",
+        )
+        assert load_config(bridge).pre_retrieval_timeout_ms == 60_000
+
+        bridge.write_text(json.dumps({"rag_path": rag_path}), encoding="utf-8")
+        config = load_config(bridge)
+        assert config.pre_retrieval_timeout_ms == 8_000
+        assert config.to_dict()["pre_retrieval_timeout_ms"] == 8_000
+    finally:
+        bridge.unlink(missing_ok=True)
+
+
 def test_holo_indicator_is_tolerated_and_preserved() -> None:
     bridge = _bridge_path("holo-indicator")
     try:

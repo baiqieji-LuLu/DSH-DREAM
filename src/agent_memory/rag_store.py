@@ -93,6 +93,42 @@ MIN_VECTOR_SCORE: Final[float] = 0.35
 RRF_K: Final[int] = 60
 DEFAULT_FLAT_MAX_RECORDS: Final[int] = 200_000
 
+
+def _add_timing(
+    timings: dict[str, float] | None,
+    key: str,
+    seconds: float,
+) -> None:
+    """Accumulate one retrieval stage without affecting the no-timing path."""
+    if timings is None:
+        return
+    timings[key] = timings.get(key, 0.0) + max(0.0, seconds)
+
+
+def _retrieval_timing_line(
+    timings: Mapping[str, float],
+    started: float,
+) -> str:
+    """Format the one-line stage summary; fusion absorbs unmeasured setup."""
+    elapsed_ms = max(0.0, (time.perf_counter() - started) * 1000.0)
+    vectorize_ms = round(timings.get("vectorize", 0.0) * 1000.0, 1)
+    vector_scan_ms = round(timings.get("vector_scan", 0.0) * 1000.0, 1)
+    bm25_ms = round(timings.get("bm25", 0.0) * 1000.0, 1)
+    cache_ms = round(timings.get("cache", 0.0) * 1000.0, 1)
+    measured_ms = vectorize_ms + vector_scan_ms + bm25_ms + cache_ms
+    fusion_ms = round(max(0.0, elapsed_ms - measured_ms), 1)
+    total_ms = round(measured_ms + fusion_ms, 1)
+    return (
+        "[Retrieval][Timing] "
+        f"vectorize={vectorize_ms:.1f}ms "
+        f"vector_scan={vector_scan_ms:.1f}ms "
+        f"bm25={bm25_ms:.1f}ms "
+        f"fusion={fusion_ms:.1f}ms "
+        f"cache={cache_ms:.1f}ms "
+        f"total={total_ms:.1f}ms"
+    )
+
+
 # One PersistentClient per persistence directory. Chroma keeps a process-wide
 # system cache keyed by path; constructing a second client with different
 # settings triggers "An instance of Chroma already exists ... with different
@@ -1096,6 +1132,8 @@ class RAGStore:
         ``"archive_reconstructed"`` to query rebuilt history explicitly.
         ``None`` (default) mixes both.
         """
+        started = time.perf_counter()
+        timings: dict[str, float] = {}
         query_text = self._validate_query(query)
         if isinstance(top_k, bool) or not isinstance(top_k, int) or top_k <= 0:
             raise MemoryValidationError("top_k must be a positive integer")
@@ -1117,11 +1155,13 @@ class RAGStore:
             query_text,
             top_k=candidate_k,
             selected_types=selected_types,
+            timings=timings,
         )
         bm25_hits = self._bm25_search(
             query_text,
             top_k=candidate_k,
             selected_types=selected_types,
+            timings=timings,
         )
         fused = self._rrf_fuse(vector_hits, bm25_hits)
         if selected_time_sources is not None:
@@ -1133,28 +1173,25 @@ class RAGStore:
         intent = self._query_intent(query_text)
         timeline_like = timeline_mode or intent in {"timeline", "time"}
         if timeline_like:
-            timeline = fused[:top_k]
-            timeline.sort(
+            result_hits = fused[:top_k]
+            result_hits.sort(
                 key=lambda hit: (
                     self._hit_timestamp_ms(hit),
                     hit.memory_id,
                 )
             )
-            print(
-                f"[Retrieval] Returned {len(timeline)} memories, "
-                f"intent={intent}, sorted by: timestamp ascending (timeline).",
-                file=sys.stderr,
-                flush=True,
-            )
-            return timeline
-        reranked = self._rerank_recency(fused, query_text)[:top_k]
+            sort_label = "timestamp ascending (timeline)"
+        else:
+            result_hits = self._rerank_recency(fused, query_text)[:top_k]
+            sort_label = "RRF + 时间衰减"
+        print(_retrieval_timing_line(timings, started), file=sys.stderr, flush=True)
         print(
-            f"[Retrieval] Returned {len(reranked)} memories, "
-            f"intent={intent}, sorted by: RRF + 时间衰减.",
+            f"[Retrieval] Returned {len(result_hits)} memories, "
+            f"intent={intent}, sorted by: {sort_label}.",
             file=sys.stderr,
             flush=True,
         )
-        return reranked
+        return result_hits
 
     def search_vector(
         self,
@@ -1180,6 +1217,7 @@ class RAGStore:
         *,
         top_k: int,
         selected_types: set[str] | None,
+        timings: dict[str, float] | None = None,
     ) -> list[MemoryHit]:
         total = self.count()
         if total == 0:
@@ -1193,6 +1231,7 @@ class RAGStore:
                 query_text,
                 top_k=top_k,
                 selected_types=selected_types,
+                timings=timings,
             )
             if flat_hits is not None:
                 return flat_hits
@@ -1205,9 +1244,15 @@ class RAGStore:
                 "include": ["documents", "metadatas", "distances"],
             }
             if self._embedding_backend is not None:
+                vectorize_start = time.perf_counter()
                 query_args["query_embeddings"] = [
                     self._embedding_backend.embed_query(query_text)
                 ]
+                _add_timing(
+                    timings,
+                    "vectorize",
+                    time.perf_counter() - vectorize_start,
+                )
             else:
                 encoded_query = (
                     f"{self._query_instruction}{query_text}"
@@ -1217,17 +1262,32 @@ class RAGStore:
                 query_args["query_texts"] = [encoded_query]
             if selected_types is not None:
                 query_args["where"] = self._source_filter(selected_types)
+            scan_start = time.perf_counter()
             result = self._backend.query(**query_args)
+            _add_timing(
+                timings,
+                "vector_scan",
+                time.perf_counter() - scan_start,
+            )
         return self._parse_hits(result)
 
-    def _ensure_corpus_cache(self) -> bool:
+    def _ensure_corpus_cache(
+        self,
+        timings: dict[str, float] | None = None,
+    ) -> bool:
         """Load ids/docs/metadatas (and embeddings for Flat) exactly once."""
         with self._lock:
             if self._corpus_ids is not None:
                 return True
+            cache_start = time.perf_counter()
+
+            def record_cache() -> None:
+                _add_timing(timings, "cache", time.perf_counter() - cache_start)
+
             if not _NUMPY_AVAILABLE:
                 self._flat_unavailable = True
                 self._bm25_unavailable = True
+                record_cache()
                 return False
             total = self.count()
             if total == 0:
@@ -1235,6 +1295,7 @@ class RAGStore:
                 self._corpus_documents = []
                 self._corpus_metadatas = []
                 self._flat_embeddings = np.empty((0, 0), dtype=np.float32)
+                record_cache()
                 return True
             include_embeddings = (
                 self._flat_max_records > 0 and total < self._flat_max_records
@@ -1305,6 +1366,7 @@ class RAGStore:
                     norms = np.linalg.norm(matrix, axis=1, keepdims=True)
                     norms[norms == 0] = 1.0
                     self._flat_embeddings = matrix / norms
+                record_cache()
                 return True
             except Exception:
                 # Injected test doubles or unusual clients may not support the
@@ -1315,6 +1377,7 @@ class RAGStore:
                 self._flat_embeddings = None
                 self._flat_unavailable = True
                 self._bm25_unavailable = True
+                record_cache()
                 return False
 
     def _search_flat(
@@ -1323,13 +1386,15 @@ class RAGStore:
         *,
         top_k: int,
         selected_types: set[str] | None,
+        timings: dict[str, float] | None = None,
     ) -> list[MemoryHit] | None:
-        if not _NUMPY_AVAILABLE or not self._ensure_corpus_cache():
+        if not _NUMPY_AVAILABLE or not self._ensure_corpus_cache(timings):
             return None
         if self._flat_embeddings is None or self._corpus_ids is None:
             return None
         if not self._corpus_ids:
             return []
+        vectorize_start = time.perf_counter()
         if self._embedding_backend is not None:
             query_vector = np.asarray(
                 self._embedding_backend.embed_query(query_text),
@@ -1347,40 +1412,53 @@ class RAGStore:
                 self._embedding_function([encoded_query])[0],
                 dtype=np.float32,
             )
-        norm = float(np.linalg.norm(query_vector))
-        if norm == 0:
-            return []
-        query_vector = query_vector / norm
-        sims = self._flat_embeddings @ query_vector
-        if selected_types is not None:
-            mask = np.asarray(
-                [
-                    str(metadata.get("source_type")) in selected_types
-                    for metadata in (self._corpus_metadatas or [])
-                ],
-                dtype=bool,
+        _add_timing(
+            timings,
+            "vectorize",
+            time.perf_counter() - vectorize_start,
+        )
+        scan_start = time.perf_counter()
+        try:
+            norm = float(np.linalg.norm(query_vector))
+            if norm == 0:
+                return []
+            query_vector = query_vector / norm
+            sims = self._flat_embeddings @ query_vector
+            if selected_types is not None:
+                mask = np.asarray(
+                    [
+                        str(metadata.get("source_type")) in selected_types
+                        for metadata in (self._corpus_metadatas or [])
+                    ],
+                    dtype=bool,
+                )
+                sims = np.where(mask, sims, -np.inf)
+            limit = min(top_k, len(sims))
+            if limit <= 0:
+                return []
+            order = np.argsort(-sims)[:limit]
+            hits: list[MemoryHit] = []
+            for index in order.tolist():
+                similarity = float(sims[index])
+                if not np.isfinite(similarity):
+                    continue
+                hit = self._build_hit(
+                    self._corpus_ids[index],
+                    (self._corpus_documents or [])[index],
+                    (self._corpus_metadatas or [])[index],
+                    1.0 - similarity,
+                    similarity=similarity,
+                    retrieval_source="vector",
+                )
+                if hit is not None:
+                    hits.append(hit)
+            return hits
+        finally:
+            _add_timing(
+                timings,
+                "vector_scan",
+                time.perf_counter() - scan_start,
             )
-            sims = np.where(mask, sims, -np.inf)
-        limit = min(top_k, len(sims))
-        if limit <= 0:
-            return []
-        order = np.argsort(-sims)[:limit]
-        hits: list[MemoryHit] = []
-        for index in order.tolist():
-            similarity = float(sims[index])
-            if not np.isfinite(similarity):
-                continue
-            hit = self._build_hit(
-                self._corpus_ids[index],
-                (self._corpus_documents or [])[index],
-                (self._corpus_metadatas or [])[index],
-                1.0 - similarity,
-                similarity=similarity,
-                retrieval_source="vector",
-            )
-            if hit is not None:
-                hits.append(hit)
-        return hits
 
     def _rerank_recency(
         self,
@@ -1599,13 +1677,16 @@ class RAGStore:
                 )
         return tokens
 
-    def _ensure_bm25(self) -> bool:
+    def _ensure_bm25(
+        self,
+        timings: dict[str, float] | None = None,
+    ) -> bool:
         """Build the full-corpus BM25 index once, lazily."""
         if self._bm25 is not None:
             return True
         if BM25Okapi is None or self._bm25_unavailable:
             return False
-        if not self._ensure_corpus_cache():
+        if not self._ensure_corpus_cache(timings):
             return False
         documents = self._corpus_documents or []
         if not documents:
@@ -1626,50 +1707,65 @@ class RAGStore:
         *,
         top_k: int,
         selected_types: set[str] | None,
+        timings: dict[str, float] | None = None,
     ) -> list[MemoryHit]:
         """Rank the entire corpus with BM25 (no candidate-window shortcut)."""
-        if not _NUMPY_AVAILABLE or not self._ensure_bm25():
-            return []
-        query_tokens = self._lexical_tokens(query_text)
-        if not query_tokens:
-            return []
-        bm25 = self._bm25
-        if bm25 is None:
-            return []
+        cache_before = (timings or {}).get("cache", 0.0)
+        bm25_start = time.perf_counter()
         try:
-            scores = np.asarray(bm25.get_scores(query_tokens), dtype=np.float32)
-        except Exception:
-            return []
-        if scores.size == 0:
-            return []
-        if selected_types is not None:
-            mask = np.asarray(
-                [
-                    str(metadata.get("source_type")) in selected_types
-                    for metadata in (self._corpus_metadatas or [])
-                ],
-                dtype=bool,
-            )
-            scores = np.where(mask, scores, -np.inf)
-        limit = min(top_k, len(scores))
-        if limit <= 0:
-            return []
-        order = np.argsort(-scores)[:limit]
-        hits: list[MemoryHit] = []
-        for index in order.tolist():
-            score = float(scores[index])
-            if not np.isfinite(score) or score <= 0.0:
-                continue
-            hit = self._build_hit(
-                (self._corpus_ids or [])[index],
-                (self._corpus_documents or [])[index],
-                (self._corpus_metadatas or [])[index],
-                None,
-                retrieval_source="bm25",
-            )
-            if hit is not None:
-                hits.append(hit)
-        return hits
+            if not _NUMPY_AVAILABLE or not self._ensure_bm25(timings):
+                return []
+            query_tokens = self._lexical_tokens(query_text)
+            if not query_tokens:
+                return []
+            bm25 = self._bm25
+            if bm25 is None:
+                return []
+            try:
+                scores = np.asarray(
+                    bm25.get_scores(query_tokens),
+                    dtype=np.float32,
+                )
+            except Exception:
+                return []
+            if scores.size == 0:
+                return []
+            if selected_types is not None:
+                mask = np.asarray(
+                    [
+                        str(metadata.get("source_type")) in selected_types
+                        for metadata in (self._corpus_metadatas or [])
+                    ],
+                    dtype=bool,
+                )
+                scores = np.where(mask, scores, -np.inf)
+            limit = min(top_k, len(scores))
+            if limit <= 0:
+                return []
+            order = np.argsort(-scores)[:limit]
+            hits: list[MemoryHit] = []
+            for index in order.tolist():
+                score = float(scores[index])
+                if not np.isfinite(score) or score <= 0.0:
+                    continue
+                hit = self._build_hit(
+                    (self._corpus_ids or [])[index],
+                    (self._corpus_documents or [])[index],
+                    (self._corpus_metadatas or [])[index],
+                    None,
+                    retrieval_source="bm25",
+                )
+                if hit is not None:
+                    hits.append(hit)
+            return hits
+        finally:
+            if timings is not None:
+                cache_spent = timings.get("cache", 0.0) - cache_before
+                _add_timing(
+                    timings,
+                    "bm25",
+                    time.perf_counter() - bm25_start - cache_spent,
+                )
 
     @staticmethod
     def _rrf_fuse(

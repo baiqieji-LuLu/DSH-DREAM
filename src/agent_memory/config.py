@@ -63,6 +63,7 @@ DSH_CONFIG_ENV: Final[str] = "DSH_DREAM_CONFIG"
 DEFAULT_RAG_PATH: Final[Path] = _default_rag_path()
 DEFAULT_MAX_WINDOW_TOKENS: Final[int] = 1_500
 DEFAULT_RETRIEVAL_TOP_K: Final[int] = 5
+DEFAULT_PRE_RETRIEVAL_TIMEOUT_MS: Final[int] = 8_000
 MAX_WINDOW_TOKENS: Final[int] = 32_768
 MAX_TOP_K: Final[int] = 20
 DEFAULT_STORAGE_BACKEND: Final[str] = "sqlite-vec"
@@ -380,6 +381,7 @@ class MemoryConfig:
     rag_path: Path = DEFAULT_RAG_PATH
     max_window_tokens: int = DEFAULT_MAX_WINDOW_TOKENS
     retrieval_top_k: int = DEFAULT_RETRIEVAL_TOP_K
+    pre_retrieval_timeout_ms: int = DEFAULT_PRE_RETRIEVAL_TIMEOUT_MS
     storage_backend: str = DEFAULT_STORAGE_BACKEND
     embedding_engine: str = DEFAULT_EMBEDDING_ENGINE
     embedding_provider: str = DEFAULT_EMBEDDING_PROVIDER
@@ -404,6 +406,7 @@ class MemoryConfig:
             "rag_path": str(self.rag_path),
             "max_window_tokens": self.max_window_tokens,
             "retrieval_top_k": self.retrieval_top_k,
+            "pre_retrieval_timeout_ms": self.pre_retrieval_timeout_ms,
             "storage_backend": self.storage_backend,
             "embedding_engine": self.embedding_engine,
             "embedding_provider": self.embedding_provider,
@@ -617,6 +620,12 @@ def load_config(config_path: str | Path | None = None) -> MemoryConfig:
             minimum=1,
             maximum=MAX_TOP_K,
         ),
+        pre_retrieval_timeout_ms=_coerce_int(
+            merged.get("pre_retrieval_timeout_ms"),
+            DEFAULT_PRE_RETRIEVAL_TIMEOUT_MS,
+            minimum=100,
+            maximum=60_000,
+        ),
         storage_backend=_coerce_storage_backend(
             merged.get("storage_backend"),
         ),
@@ -669,6 +678,7 @@ __all__ = (
     "DEFAULT_EMBEDDING_PROVIDER",
     "DEFAULT_HOLO_INDICATOR_ENABLED",
     "DEFAULT_MAX_WINDOW_TOKENS",
+    "DEFAULT_PRE_RETRIEVAL_TIMEOUT_MS",
     "DEFAULT_RAG_PATH",
     "DEFAULT_RETRIEVAL_TOP_K",
     "DEFAULT_ROUTER_BUDGET_MS",

@@ -243,14 +243,32 @@ export class PythonBridge {
     return response || { ok: false, code: "LOCAL_NOT_READY" };
   }
 
-  async query(query, topK = 3, timeoutMs = 800, signal = null, timelineMode = false) {
+  async query(query, topK = 3, timeoutMs = 8000, signal = null, timelineMode = false) {
     const text = String(query || "").trim();
-    if (!text) return null;
+    if (!text) {
+      return {
+        ok: false,
+        code: "INVALID_INPUT",
+        error: "query must not be empty",
+      };
+    }
     // Never await the uv installer from pre-retrieval: fail open immediately
     // while the environment gate is still checking/provisioning.
-    if (!["ready", "installed"].includes(this.runtime.state.status)) return null;
+    if (!["ready", "installed"].includes(this.runtime.state.status)) {
+      return {
+        ok: false,
+        code: "LOCAL_NOT_READY",
+        error: `runtime status=${this.runtime.state.status}`,
+      };
+    }
     const child = await this.ensure();
-    if (!child?.stdin || child.stdin.destroyed) return null;
+    if (!child?.stdin || child.stdin.destroyed) {
+      return {
+        ok: false,
+        code: "BRIDGE_UNAVAILABLE",
+        error: "Python bridge stdin is unavailable",
+      };
+    }
     const requestId = randomUUID();
     return new Promise((resolve) => {
       let settled = false;
@@ -263,13 +281,42 @@ export class PythonBridge {
         signal?.removeEventListener?.("abort", onAbort);
         resolve(value);
       };
-      const onAbort = () => finish(null);
-      const effectiveTimeout = this.coldStart ? 15000 : timeoutMs;
+      const requestedTimeout = Number(timeoutMs);
+      const baseTimeout =
+        Number.isFinite(requestedTimeout) && requestedTimeout > 0
+          ? requestedTimeout
+          : 8000;
+      // The first query may need model load time; keep the cold-start grace
+      // but never let it shorten an explicitly larger gate timeout.
+      const effectiveTimeout = this.coldStart
+        ? Math.max(15000, baseTimeout)
+        : baseTimeout;
+      const onAbort = () =>
+        finish({
+          ok: false,
+          code: "QUERY_ABORTED",
+          error: "query aborted",
+          timeout_ms: effectiveTimeout,
+        });
       this.coldStart = false;
-      timer = setTimeout(() => finish(null), effectiveTimeout);
+      timer = setTimeout(
+        () =>
+          finish({
+            ok: false,
+            code: "QUERY_TIMEOUT",
+            error: `query timeout after ${effectiveTimeout}ms`,
+            timeout_ms: effectiveTimeout,
+          }),
+        effectiveTimeout,
+      );
       if (signal) {
         if (signal.aborted) {
-          finish(null);
+          finish({
+            ok: false,
+            code: "QUERY_ABORTED",
+            error: "query aborted",
+            timeout_ms: effectiveTimeout,
+          });
           return;
         }
         signal.addEventListener("abort", onAbort, { once: true });
@@ -287,7 +334,11 @@ export class PythonBridge {
         );
       } catch (error) {
         this.diag(`bridge query write failed: ${error?.stack || error}`);
-        finish(null);
+        finish({
+          ok: false,
+          code: "BRIDGE_WRITE_FAILED",
+          error: String(error),
+        });
       }
     });
   }

@@ -39,6 +39,31 @@ export const HOLO_INDICATOR_DEFAULT = Object.freeze({
   enabled: true,
 });
 
+/** Gate wait defaults; must cover observed retrieval latency (3.2-3.4 s). */
+export const DEFAULT_PRE_RETRIEVAL_TIMEOUT_MS = 8000;
+export const MIN_PRE_RETRIEVAL_TIMEOUT_MS = 100;
+export const MAX_PRE_RETRIEVAL_TIMEOUT_MS = 60000;
+
+/**
+ * Normalize the injection gate's wait from a Config form or bridge payload.
+ * A value the settings form did not send is taken from `previous`, so unrelated
+ * settings saves never reset a custom timeout.
+ *
+ * @param {unknown} value Raw timeout value (possibly a volatile reference).
+ * @param {unknown} [previous] Previously stored timeout.
+ * @returns {number}
+ */
+export function normalizePreRetrievalTimeout(value, previous = null) {
+  const raw = Number(
+    current(value ?? previous) ?? DEFAULT_PRE_RETRIEVAL_TIMEOUT_MS,
+  );
+  if (!Number.isFinite(raw)) return DEFAULT_PRE_RETRIEVAL_TIMEOUT_MS;
+  return Math.max(
+    MIN_PRE_RETRIEVAL_TIMEOUT_MS,
+    Math.min(MAX_PRE_RETRIEVAL_TIMEOUT_MS, Math.round(raw)),
+  );
+}
+
 /**
  * Normalize the nested `holo_indicator` block from the Config form, the
  * settings descriptor, or the bridge file. A missing block (old config) falls
@@ -224,6 +249,10 @@ export function normalizePayload(raw, previous = null) {
     hf_home_path: String(current(value.hf_home_path) ?? "").trim(),
     max_window_tokens: Number(current(value.max_window_tokens) ?? 1500),
     retrieval_top_k: Number(current(value.retrieval_top_k) ?? 5),
+    pre_retrieval_timeout_ms: normalizePreRetrievalTimeout(
+      value.pre_retrieval_timeout_ms,
+      previous?.pre_retrieval_timeout_ms,
+    ),
     embedding_provider:
       provider === "openai_compatible" ? "openai_compatible" : "local",
     embedding_model: String(current(value.embedding_model) ?? "").trim(),

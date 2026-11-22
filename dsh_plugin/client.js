@@ -33,6 +33,9 @@ window.__ModuleLoader__.load({
       topK: 'Retrieval top-k',
       topKHint:
         'Number of RAG memories returned by memory_search (1–20).',
+      preRetrievalTimeout: 'Pre-retrieval gate timeout (ms)',
+      preRetrievalTimeoutHint:
+        'How long the injection gate waits for retrieval before reporting "unavailable". Must exceed real retrieval latency; default 8000 ms.',
       ragPath: 'Chroma persistence path',
       ragPathHint:
         "Leave blank to use the DSH user directory; enter an absolute path to customize, or set AGENT_MEMORY_RAG_PATH to override.",
@@ -137,6 +140,8 @@ window.__ModuleLoader__.load({
       invalidMax:
         'Window token budget must be an integer between 128 and 32768.',
       invalidTopK: 'Retrieval top-k must be an integer between 1 and 20.',
+      invalidPreRetrievalTimeout:
+        'Pre-retrieval gate timeout must be an integer between 100 and 60000.',
     };
 
     const zh = {
@@ -152,6 +157,9 @@ window.__ModuleLoader__.load({
       maxWindowHint: '用于初始化 WindowManager 的 Token 预算（128–32768）。',
       topK: 'RAG 召回数量',
       topKHint: 'memory_search 返回的记忆条数（1–20）。',
+      preRetrievalTimeout: '注入闸门等待（毫秒）',
+      preRetrievalTimeoutHint:
+        '等待自动预检索的最长时间；超时按“不可用”记录，不会当成“无命中”。必须大于真实检索耗时，默认 8000 毫秒。',
       ragPath: 'Chroma 持久化路径',
       ragPathHint:
         '留空则默认存储在 DSH 用户目录下；如需自定义，请填入绝对路径，或通过环境变量 AGENT_MEMORY_RAG_PATH 覆盖。',
@@ -249,6 +257,8 @@ window.__ModuleLoader__.load({
       saveFailed: '当前部署没有接受这些值，草稿已保留。',
       invalidMax: '窗口 Token 预算必须是 128–32768 之间的整数。',
       invalidTopK: 'RAG 召回数量必须是 1–20 之间的整数。',
+      invalidPreRetrievalTimeout:
+        '注入闸门等待必须是 100–60000 之间的整数。',
     };
 
     const CSS = `
@@ -933,6 +943,9 @@ window.__ModuleLoader__.load({
         hfHomePath: String(current.hf_home_path ?? ''),
         max: String(current.max_window_tokens ?? 1500),
         top: String(current.retrieval_top_k ?? 5),
+        preRetrievalTimeout: String(
+          current.pre_retrieval_timeout_ms ?? 8000,
+        ),
         embeddingProvider:
           current.embedding_provider === 'openai_compatible'
             ? 'openai_compatible'
@@ -970,6 +983,14 @@ window.__ModuleLoader__.load({
       if (!Number.isInteger(top) || top < 1 || top > 20) {
         return { error: 'invalidTopK' };
       }
+      const preRetrievalTimeout = Number(draft.preRetrievalTimeout);
+      if (
+        !Number.isInteger(preRetrievalTimeout) ||
+        preRetrievalTimeout < 100 ||
+        preRetrievalTimeout > 60000
+      ) {
+        return { error: 'invalidPreRetrievalTimeout' };
+      }
       const provider =
         draft.embeddingProvider === 'openai_compatible'
           ? 'openai_compatible'
@@ -992,6 +1013,7 @@ window.__ModuleLoader__.load({
       return {
         max,
         top,
+        preRetrievalTimeout,
         provider,
         model: String(draft.embeddingModel || '').trim(),
         apiKey,
@@ -1222,6 +1244,7 @@ window.__ModuleLoader__.load({
           hf_home_path: String(draft.hfHomePath || '').trim(),
           max_window_tokens: parsed.max,
           retrieval_top_k: parsed.top,
+          pre_retrieval_timeout_ms: parsed.preRetrievalTimeout,
           embedding_provider: parsed.provider,
           embedding_model: parsed.model,
           embedding_api_key: parsed.apiKey,
@@ -1281,6 +1304,11 @@ window.__ModuleLoader__.load({
                 op: 'set',
                 path: ['retrieval_top_k'],
                 value: parsed.top,
+              },
+              {
+                op: 'set',
+                path: ['pre_retrieval_timeout_ms'],
+                value: parsed.preRetrievalTimeout,
               },
               {
                 op: 'set',
@@ -1523,6 +1551,39 @@ window.__ModuleLoader__.load({
               value: draft.top,
               disabled,
               onChange: (event) => edit({ top: event.target.value }),
+            }),
+          ),
+          h(
+            'div',
+            { className: 'am-row' },
+            h(
+              'div',
+              { className: 'am-copy' },
+              h(
+                'label',
+                {
+                  className: 'am-label',
+                  htmlFor: 'am-pre-retrieval-timeout',
+                },
+                tr('preRetrievalTimeout'),
+              ),
+              h(
+                'div',
+                { className: 'am-hint' },
+                tr('preRetrievalTimeoutHint'),
+              ),
+            ),
+            h('input', {
+              id: 'am-pre-retrieval-timeout',
+              className: 'am-input',
+              type: 'number',
+              min: 100,
+              max: 60000,
+              step: 1,
+              value: draft.preRetrievalTimeout,
+              disabled,
+              onChange: (event) =>
+                edit({ preRetrievalTimeout: event.target.value }),
             }),
           ),
           h(

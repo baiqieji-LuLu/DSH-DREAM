@@ -135,6 +135,28 @@ assert.ok(
   "default position does not target the conversation box",
 );
 assert.ok(
+  dictionaries.zh.preRetrievalTimeout &&
+    dictionaries.en.preRetrievalTimeout,
+  "pre-retrieval timeout copy is missing",
+);
+assert.ok(
+  dictionaries.zh.invalidPreRetrievalTimeout &&
+    dictionaries.en.invalidPreRetrievalTimeout,
+  "pre-retrieval timeout validation copy is missing",
+);
+assert.ok(
+  source.includes("pre_retrieval_timeout_ms: parsed.preRetrievalTimeout"),
+  "save payload is missing pre_retrieval_timeout_ms",
+);
+assert.ok(
+  source.includes("path: ['pre_retrieval_timeout_ms']"),
+  "settings mutation is missing pre_retrieval_timeout_ms",
+);
+assert.ok(
+  source.includes("am-pre-retrieval-timeout"),
+  "pre-retrieval timeout input is missing",
+);
+assert.ok(
   source.includes("setPointerCapture"),
   "badge drag is missing pointer capture",
 );

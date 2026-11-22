@@ -268,6 +268,36 @@ test("holo indicator values unwrap volatile references", () => {
   assert.deepEqual(payload.holo_indicator, { enabled: false });
 });
 
+test("pre-retrieval gate timeout defaults, clamps, and preserves previous", () => {
+  assert.equal(normalizePayload({}).pre_retrieval_timeout_ms, 8000);
+  assert.equal(
+    normalizePayload({ pre_retrieval_timeout_ms: 250 }).pre_retrieval_timeout_ms,
+    250,
+  );
+  assert.equal(
+    normalizePayload({ pre_retrieval_timeout_ms: 5 }).pre_retrieval_timeout_ms,
+    100,
+  );
+  assert.equal(
+    normalizePayload({ pre_retrieval_timeout_ms: 999999 })
+      .pre_retrieval_timeout_ms,
+    60000,
+  );
+  assert.equal(
+    normalizePayload({ pre_retrieval_timeout_ms: "bad" })
+      .pre_retrieval_timeout_ms,
+    8000,
+  );
+  const previousWithTimeout = {
+    ...previous,
+    pre_retrieval_timeout_ms: 250,
+  };
+  assert.equal(
+    normalizePayload({}, previousWithTimeout).pre_retrieval_timeout_ms,
+    250,
+  );
+});
+
 test("redactPayload never leaks the embedding key", () => {
   const redacted = redactPayload({
     embedding_api_key: "sk-secret",

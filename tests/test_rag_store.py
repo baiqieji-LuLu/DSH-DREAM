@@ -2,6 +2,9 @@
 
 from __future__ import annotations
 
+import contextlib
+import io
+import re
 import shutil
 import sys
 import unittest
@@ -165,6 +168,24 @@ class RAGStoreTests(unittest.TestCase):
             self.collection.last_where,
             {"source_type": {"$in": ["system_fact", "user_message"]}},
         )
+
+    def test_search_emits_stage_timing_summary(self) -> None:
+        self.store.add_memory("I prefer tea.", "user_message")
+        self.store.add_memory("Allergy: peanuts.", "system_fact")
+        buffer = io.StringIO()
+        with contextlib.redirect_stderr(buffer):
+            hits = self.store.search_memory("diet", top_k=2)
+        self.assertTrue(hits)
+        log = buffer.getvalue()
+        match = re.search(
+            r"\[Retrieval\]\[Timing\] vectorize=([\d.]+)ms "
+            r"vector_scan=([\d.]+)ms bm25=([\d.]+)ms "
+            r"fusion=([\d.]+)ms cache=([\d.]+)ms total=([\d.]+)ms",
+            log,
+        )
+        self.assertIsNotNone(match, log)
+        values = [float(value) for value in match.groups()]
+        self.assertAlmostEqual(sum(values[:5]), values[5], delta=0.11)
 
     def test_read_side_whitelist_skips_tampered_model_hint(self) -> None:
         self.collection.records["tampered"] = (

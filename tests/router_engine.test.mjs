@@ -40,9 +40,11 @@ import {
 import { CloudRouter, CloudRouterError } from "../dsh_plugin/router_cloud.js";
 import { LocalRouterClient } from "../dsh_plugin/router_local.js";
 import {
+  DEFAULT_PRE_RETRIEVAL_TIMEOUT_MS,
   createMemoryHint,
   recallDecision,
   registerPreRetrieval,
+  resolvePreRetrievalTimeout,
   topSimilarity,
 } from "../dsh_plugin/pre_retrieval.js";
 
@@ -1032,15 +1034,23 @@ function preStep(handler, query, signal) {
   );
 }
 
-function registerRouter({ config, router, queryMemory, calls }) {
+function registerRouter({
+  config,
+  router,
+  queryMemory,
+  calls,
+  callArgs = null,
+  logs = null,
+}) {
   const ctx = fakeCtx();
   registerPreRetrieval(ctx, {
     queryMemory: async (...args) => {
       calls.push(args[0]);
+      callArgs?.push(args);
       return queryMemory(...args);
     },
-    holoLog: () => {},
-    diag: () => {},
+    holoLog: (line) => logs?.push(line),
+    diag: (line) => logs?.push(line),
     getConfig: () => config,
     router,
     createUserMessage: (options) => ({ role: "user", ...options }),
@@ -1079,6 +1089,95 @@ test("recall gate accepts fused hybrids and keyword hits", () => {
     "0.80",
   );
   assert.equal(recallDecision([]).reason, "no_hits");
+});
+
+test("pre-retrieval timeout defaults and clamps", () => {
+  assert.equal(DEFAULT_PRE_RETRIEVAL_TIMEOUT_MS, 8000);
+  assert.equal(resolvePreRetrievalTimeout({}), 8000);
+  assert.equal(resolvePreRetrievalTimeout({ pre_retrieval_timeout_ms: 250 }), 250);
+  assert.equal(resolvePreRetrievalTimeout({ pre_retrieval_timeout_ms: 5 }), 100);
+  assert.equal(resolvePreRetrievalTimeout({ pre_retrieval_timeout_ms: 999999 }), 60000);
+  assert.equal(resolvePreRetrievalTimeout({ pre_retrieval_timeout_ms: "bad" }), 8000);
+});
+
+test("a gate timeout is logged as unavailable, never as no_hits", async () => {
+  const calls = [];
+  const callArgs = [];
+  const logs = [];
+  const handler = registerRouter({
+    config: {
+      enable_auto_recall: true,
+      router: { enabled: true },
+      pre_retrieval_timeout_ms: 250,
+    },
+    router: {
+      route: async () => ({ decision: "retrieve", source: "local", shadow: false }),
+    },
+    queryMemory: async () => ({
+      ok: false,
+      code: "QUERY_TIMEOUT",
+      error: "query timeout after 250ms",
+      timeout_ms: 250,
+    }),
+    calls,
+    callArgs,
+    logs,
+  });
+  const decision = await preStep(handler, "上次那个蓝色马克杯");
+  assert.equal(callArgs.length, 1);
+  assert.equal(callArgs[0][2], 250);
+  assert.equal(decision.messages.length, 1);
+  const unavailable = logs.find((line) =>
+    line.includes("[PreRetrieval] unavailable"),
+  );
+  assert.ok(unavailable, `missing unavailable log: ${logs.join("\n")}`);
+  assert.match(unavailable, /QUERY_TIMEOUT/);
+  assert.match(unavailable, /not a no-hit result/);
+  assert.equal(
+    logs.some((line) => line.includes("skipped: no_hits")),
+    false,
+  );
+});
+
+test("a null bridge response is unavailable, not an empty hit list", async () => {
+  const logs = [];
+  const handler = registerRouter({
+    config: { enable_auto_recall: true, router: { enabled: true } },
+    router: {
+      route: async () => ({ decision: "retrieve", source: "local", shadow: false }),
+    },
+    queryMemory: async () => null,
+    calls: [],
+    logs,
+  });
+  const decision = await preStep(handler, "上次那个蓝色马克杯");
+  assert.equal(decision.messages.length, 1);
+  const unavailable = logs.find((line) =>
+    line.includes("[PreRetrieval] unavailable"),
+  );
+  assert.ok(unavailable, `missing unavailable log: ${logs.join("\n")}`);
+  assert.match(unavailable, /QUERY_TIMEOUT_OR_UNAVAILABLE/);
+  assert.equal(
+    logs.some((line) => line.includes("skipped: no_hits")),
+    false,
+  );
+});
+
+test("a real empty result is still logged as no_hits", async () => {
+  const logs = [];
+  const handler = registerRouter({
+    config: { enable_auto_recall: true, router: { enabled: true } },
+    router: {
+      route: async () => ({ decision: "retrieve", source: "local", shadow: false }),
+    },
+    queryMemory: async () => ({ ok: true, result: { results: [] } }),
+    calls: [],
+    logs,
+  });
+  const decision = await preStep(handler, "上次那个蓝色马克杯");
+  assert.equal(decision.messages.length, 1);
+  assert.ok(logs.some((line) => line.includes("skipped: no_hits")));
+  assert.equal(logs.some((line) => line.includes("unavailable")), false);
 });
 
 test("memory hint tells the model to trust confirmed facts", () => {

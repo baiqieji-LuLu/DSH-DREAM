@@ -197,6 +197,16 @@ export const Config = z.object({
     .description("Number of RAG memories returned by memory_search.")
     .volatile(),
 
+  pre_retrieval_timeout_ms: z
+    .natural()
+    .min(100)
+    .max(60000)
+    .default(8000)
+    .description(
+      "Maximum wait for automatic pre-retrieval before the injection gate declares the result unavailable. Must exceed real retrieval latency; default 8000 ms.",
+    )
+    .volatile(),
+
   embedding_provider: z
     .string()
     .default("local")

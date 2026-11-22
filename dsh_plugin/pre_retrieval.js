@@ -39,6 +39,28 @@ export const SIMILARITY_THRESHOLD = 0.6;
  * it starves the model and makes it search files instead.
  */
 export const FUSED_SIMILARITY_THRESHOLD = 0.5;
+/** Gate wait must exceed real retrieval latency (observed 3.2-3.4 s). */
+export const DEFAULT_PRE_RETRIEVAL_TIMEOUT_MS = 8000;
+export const MIN_PRE_RETRIEVAL_TIMEOUT_MS = 100;
+export const MAX_PRE_RETRIEVAL_TIMEOUT_MS = 60000;
+
+/**
+ * Resolve the injection gate's wait from the bridge config.
+ *
+ * @param {object} config Normalized bridge config.
+ * @returns {number} Timeout in milliseconds, clamped to a safe range.
+ */
+export function resolvePreRetrievalTimeout(config) {
+  const raw = Number(
+    config?.pre_retrieval_timeout_ms ?? DEFAULT_PRE_RETRIEVAL_TIMEOUT_MS,
+  );
+  if (!Number.isFinite(raw)) return DEFAULT_PRE_RETRIEVAL_TIMEOUT_MS;
+  return Math.max(
+    MIN_PRE_RETRIEVAL_TIMEOUT_MS,
+    Math.min(MAX_PRE_RETRIEVAL_TIMEOUT_MS, Math.round(raw)),
+  );
+}
+
 const GREETINGS = new Set([
   "你好",
   "您好",
@@ -244,12 +266,36 @@ export function registerPreRetrieval(
    *
    * @returns {Promise<object>} the (possibly extended) pre-step decision.
    */
-  const retrieveAndInject = async (query, decision, signal) => {
-    const result = await queryMemory(query, 3, 800, signal);
-    if (result?.ok === false) {
+  const retrieveAndInject = async (query, decision, signal, timeoutMs) => {
+    const startedAt = Date.now();
+    const result = await queryMemory(query, 3, timeoutMs, signal);
+    const elapsedMs = Math.max(0, Date.now() - startedAt);
+    if (signal?.aborted) {
+      const line = `[PreRetrieval] cancelled: elapsed=${elapsedMs}ms timeout=${timeoutMs}ms`;
+      console.log(line);
+      diag(line);
+      return decision;
+    }
+    if (!result || result.ok === false) {
+      // Timeout, bridge failure, and a dependency error are "unavailable",
+      // never "no_hits". Keep this branch before the recall gate so a slow
+      // retrieval can no longer be reported as an empty result.
+      const code = result?.code || "QUERY_TIMEOUT_OR_UNAVAILABLE";
+      const detail =
+        result?.error ||
+        (code === "QUERY_TIMEOUT"
+          ? `query timeout after ${result?.timeout_ms ?? timeoutMs}ms`
+          : "bridge unavailable");
+      const envSuffix =
+        result?.python || result?.hf_home
+          ? ` python=${result.python || "unknown"} ` +
+            `hf_home=${result.hf_home || "unknown"}`
+          : "";
       const line =
-        `pre-retrieval unavailable: ${result.error || "unknown error"}; ` +
-        `python=${result.python || "unknown"}; hf_home=${result.hf_home || "unknown"}`;
+        `[PreRetrieval] unavailable (不可用): ${detail}; ` +
+        `code=${code}; timeout=${timeoutMs}ms elapsed=${elapsedMs}ms ` +
+        `(not a no-hit result)${envSuffix}`;
+      console.warn(line);
       diag(line);
       holoLog(line);
       return decision;
@@ -262,21 +308,27 @@ export function registerPreRetrieval(
       const line =
         `[PreRetrieval] skipped: ${recall.reason} ` +
         `score=${recall.score.toFixed(3)} vector>=${SIMILARITY_THRESHOLD} ` +
-        `hybrid>=${FUSED_SIMILARITY_THRESHOLD}`;
+        `hybrid>=${FUSED_SIMILARITY_THRESHOLD} retrieval_ms=${elapsedMs}`;
       console.log(line);
       diag(line);
       return decision;
     }
     const hint = createMemoryHint(result?.result);
     if (!hint || signal?.aborted) {
-      holoLog("Pre-retrieval skipped: no matching memories");
+      const line = `[PreRetrieval] skipped: empty_hint retrieval_ms=${elapsedMs}`;
+      console.log(line);
+      diag(line);
+      holoLog(line);
       return decision;
     }
     diag(
       `[PreRetrieval] inject: ${recall.reason} score=${recall.score.toFixed(3)} ` +
-        `source=${recall.retrievalSource || "unknown"} hits=${hits.length}`,
+        `source=${recall.retrievalSource || "unknown"} hits=${hits.length} ` +
+        `retrieval_ms=${elapsedMs}`,
     );
-    holoLog(`Pre-retrieval success: injected ${hits.length} memories`);
+    holoLog(
+      `Pre-retrieval success: injected ${hits.length} memories in ${elapsedMs}ms`,
+    );
     // DSH's user/message event must carry role="user" (system-role messages
     // are rejected by the session schema). Keep the user role, but use a
     // non-user source kind: Chat projects non-"user" sources as `context`
@@ -308,6 +360,7 @@ export function registerPreRetrieval(
       console.log("[PreRetrieval] skipped: enable_auto_recall=false");
       return decision;
     }
+    const preRetrievalTimeoutMs = resolvePreRetrievalTimeout(config);
 
     const query = queryFromMessages(messages);
     if (!query) {
@@ -326,7 +379,12 @@ export function registerPreRetrieval(
         return decision;
       }
       console.log(`[PreRetrieval] query=${query.slice(0, 120)}`);
-      return retrieveAndInject(query, decision, signal);
+      return retrieveAndInject(
+        query,
+        decision,
+        signal,
+        preRetrievalTimeoutMs,
+      );
     }
 
     // --- Router arbitration ---------------------------------------------
@@ -346,7 +404,12 @@ export function registerPreRetrieval(
 
     if (!route) {
       diag("[Router] no route result; neutral default = retrieve");
-      return retrieveAndInject(query, decision, signal);
+      return retrieveAndInject(
+        query,
+        decision,
+        signal,
+        preRetrievalTimeoutMs,
+      );
     }
     if (route.cancelled === true || signal?.aborted) {
       console.log("[Router] cancelled; leaving the pre-step decision unchanged");
@@ -358,7 +421,12 @@ export function registerPreRetrieval(
       // Shadow: behave exactly like the old path, record what would happen.
       holoLog(`${line} (shadow: behavioural effect disabled)`);
       diag(line);
-      return retrieveAndInject(query, decision, signal);
+      return retrieveAndInject(
+        query,
+        decision,
+        signal,
+        preRetrievalTimeoutMs,
+      );
     }
 
     if (route.decision === "skip") {
@@ -369,7 +437,12 @@ export function registerPreRetrieval(
 
     console.log(line);
     diag(line);
-    return retrieveAndInject(query, decision, signal);
+    return retrieveAndInject(
+      query,
+      decision,
+      signal,
+      preRetrievalTimeoutMs,
+    );
   };
 
   try {
